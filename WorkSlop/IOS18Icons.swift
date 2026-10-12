@@ -1,18 +1,27 @@
 import UIKit
+import CryptoKit
+import ImageIO
 
 /// iOS 18 stock icon gallery (from the user's icon pack,
-/// "iOS 18 App Icons by catwithabaloon"). Two tables on the Custom
-/// Icons page: Light and Dark. Tapping one adds it as a custom icon
+/// "iOS 18 App Icons by catwithabaloon"). Three tables on the Custom
+/// Icons page: Light, Dark and Tinted. Tapping one adds it as a custom icon
 /// entry (name + bundle ID + the icon image) - bundle IDs verified
 /// against the iTunes lookup for each app. Icons are 60x60 PNG,
-/// exactly as supplied in the pack. The pack's third variant
-/// (tinted) and artworks that could not be identified with
-/// certainty are not shipped.
+/// exactly as supplied in the pack (the Tinted set is the official
+/// catwithabaloon 2.0 artwork, byte-identical copies under
+/// iOS18Icons/Tinted).
 struct IOS18Icon: Identifiable {
     let name: String
     let bundleID: String
     let slug: String
     var id: String { slug }
+}
+
+/// Gallery variant: the Light and Dark tables from the pack,
+/// plus the Tinted set (official catwithabaloon 2.0 artwork,
+/// byte-identical copies under iOS18Icons/Tinted).
+enum IconVariant {
+    case light, dark, tinted
 }
 
 enum IOS18IconCatalog {
@@ -95,8 +104,108 @@ enum IOS18IconCatalog {
         Bundle.main.url(forResource: slug, withExtension: "png", subdirectory: "iOS18Icons/Dark") != nil
     }
 
+    static func hasTinted(slug: String) -> Bool {
+        Bundle.main.url(forResource: slug, withExtension: "png", subdirectory: "iOS18Icons/Tinted") != nil
+    }
+
+    static func tintedImageData(slug: String) -> Data? {
+        guard let url = Bundle.main.url(forResource: slug, withExtension: "png", subdirectory: "iOS18Icons/Tinted")
+        else { return nil }
+        return try? Data(contentsOf: url)
+    }
+
+    /// Decoded Tinted thumbnails, cached for the whole session
+    /// (same reasoning as the Light/Dark image cache).
+    static func tintedImage(slug: String) -> UIImage? {
+        let key = ("t:" + slug) as NSString
+        if let hit = imageCache.object(forKey: key) { return hit }
+        guard let data = tintedImageData(slug: slug),
+              let img = UIImage(data: data) else { return nil }
+        imageCache.setObject(img, forKey: key)
+        return img
+    }
+
     /// The icons that have Dark artwork, filtered once. The Custom
     /// Icons page used to re-run this filter (a bundle file lookup
     /// per icon) on every render of its ~100-row list.
     static let darkIcons: [IOS18Icon] = all.filter { hasDark(slug: $0.slug) }
+
+    /// The icons that have Tinted artwork, filtered once (same
+    /// pattern as darkIcons).
+    static let tintedIcons: [IOS18Icon] = all.filter { hasTinted(slug: $0.slug) }
+}
+
+// MARK: - Staged custom icons
+
+/// Custom icon for one app: image + bundle id + display name, staged
+/// like the desktop Icon Themes flow. The staged entry rides the
+/// parameterized WebClip write in PayloadSpec.swift.
+struct CustomIconEntry: Identifiable, Codable {
+    var id = UUID()
+    var bundleID: String = ""
+    var appName: String = ""
+    var imageData: Data? = nil
+}
+
+/// Decoded images for the user's own staged icons, cached by a
+/// full-content hash of the image data. Thumbnails are decoded
+/// downsampled (the row shows 44pt); the editor preview keeps a
+/// full-size decode, also cached.
+enum EntryImageCache {
+    private static let thumbnails = NSCache<NSString, UIImage>()
+    private static let fullSize = NSCache<NSString, UIImage>()
+
+    private static func fingerprint(_ data: Data) -> NSString {
+        // Full-content SHA-256: the key identifies the exact image
+        // bytes, so replacing an icon with a same-size edit can
+        // never leave a stale thumbnail (or stale preview) behind.
+        let digest = SHA256.hash(data: data)
+            .map { String(format: "%02x", $0) }.joined()
+        return "\(data.count):\(digest)" as NSString
+    }
+
+    static func thumbnail(_ data: Data) -> UIImage? {
+        let key = fingerprint(data)
+        if let hit = thumbnails.object(forKey: key) { return hit }
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            // 44pt row at up to 3x - same pixels the row displays.
+            kCGImageSourceThumbnailMaxPixelSize: 132,
+        ]
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+              let cg = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary)
+        else { return UIImage(data: data) }
+        let img = UIImage(cgImage: cg)
+        thumbnails.setObject(img, forKey: key)
+        return img
+    }
+
+    static func full(_ data: Data) -> UIImage? {
+        let key = fingerprint(data)
+        if let hit = fullSize.object(forKey: key) { return hit }
+        guard let img = UIImage(data: data) else { return nil }
+        fullSize.setObject(img, forKey: key)
+        return img
+    }
+}
+
+enum CustomIconStore {
+    private static var fileURL: URL {
+        FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("custom-icons.json")
+    }
+
+    static func load() -> [CustomIconEntry] {
+        guard let data = try? Data(contentsOf: fileURL),
+              let entries = try? JSONDecoder().decode([CustomIconEntry].self, from: data)
+        else { return [] }
+        return entries
+    }
+
+    static func save(_ entries: [CustomIconEntry]) {
+        if let data = try? JSONEncoder().encode(entries) {
+            try? data.write(to: fileURL, options: .atomic)
+        }
+    }
 }

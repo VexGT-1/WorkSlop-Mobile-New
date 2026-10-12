@@ -45,6 +45,8 @@ targets:
           - iOS18Icons
       - path: WorkSlop/iOS18Icons
         type: folder
+    dependencies:
+      - sdk: libsqlite3.tbd
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.adnan120hz.workslop

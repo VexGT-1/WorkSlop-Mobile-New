@@ -52,7 +52,8 @@ enum LockdownProbe {
                                               : socklen_t(MemoryLayout<sockaddr_in6>.size)
             if getnameinfo(sa, len, &host, socklen_t(host.count), nil, 0, NI_NUMERICHOST) == 0 {
                 let addr = String(cString: host)
-                if addr != "127.0.0.1" && !addr.hasPrefix("fe80") && !out.contains(addr) {
+                // Loopback (v4 + v6) and link-local are never a VPN tunnel.
+                if addr != "127.0.0.1" && addr != "::1" && !addr.hasPrefix("fe80") && !addr.hasPrefix("FE80") && !out.contains(addr) {
                     out.append(addr)
                 }
             }

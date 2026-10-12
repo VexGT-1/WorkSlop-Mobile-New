@@ -1,25 +1,13 @@
 import Foundation
 
 /// Delivery route a tweak rides on iOS 26. Everything stages through the
-/// partial (sparse) restore EXCEPT the S8 "Liquid Glass (Terbaru)" tweak,
+/// partial (sparse) restore EXCEPT the S8 "Liquid Glass (Latest)" tweak,
 /// which rides a full backup -> modify -> restore with all data, exactly
 /// like the desktop. (The desktop's old Beta 1 tweaks were removed by
 /// the maintainer and do not exist here.)
 enum DeliveryRoute: String {
     case partialRestore = "Partial restore"
     case fullBackup = "Full backup → modify → restore"
-
-    /// What the user sees on THIS device. The partial (sparse) restore
-    /// exists only up to the latest iOS 26; on iOS 27 every route rides
-    /// the full backup -> modify -> restore flow, like the desktop -
-    /// so the words "Partial restore" never appear on iOS 27.
-    var displayName: String {
-        if self == .partialRestore,
-           ProcessInfo.processInfo.operatingSystemVersion.majorVersion >= 27 {
-            return DeliveryRoute.fullBackup.rawValue
-        }
-        return rawValue
-    }
     /// The desktop's targeted container backup exists only for the
     /// PosterBoard Configurations (database) mode, which mobile does
     /// not offer; mobile PosterBoard is Descriptors = partial restore.
@@ -81,21 +69,6 @@ struct Feature: Identifiable {
     var reachesIOS27: Bool {
         guard let max = window.maxExclusive else { return true }
         return max.major > 27 || (max.major == 27 && max.minor > 0)
-    }
-
-    /// Short route label for chips: never lets "Partial restore"
-    /// stand next to an iOS window that includes 27.
-    var routeShort: String {
-        if route == .partialRestore {
-            // On an iOS 27 device the route that actually runs
-            // is the full backup one - the chip says so.
-            if reachesIOS27,
-               ProcessInfo.processInfo.operatingSystemVersion.majorVersion >= 27 {
-                return DeliveryRoute.fullBackup.rawValue
-            }
-            return "Partial restore (max iOS 26)"
-        }
-        return route.displayName
     }
 
     /// Full route sentence for the info sheet. Standing wording:
@@ -216,22 +189,35 @@ enum DeviceStatus {
         return String(decoding: bytes, as: UTF8.self)
     }()
 
-    /// True while any VPN tunnel interface (utun*) is up with an
-    /// address — the state the WireGuard loopback tunnel produces.
-    /// A sandboxed app cannot tell which VPN app owns the tunnel,
-    /// only that one is active; the UI words it exactly that way.
+    /// Phase 1 of the two-phase tunnel check (ala GoldenNugget's
+    /// Tunnel.isInterfaceUp): true while a utun* interface carries a
+    /// real tunnel address. Deliberately NO IFF_UP|IFF_RUNNING gate —
+    /// that flag check was the "VPN tunnel ga kedeteksi" bug: a tunnel
+    /// can be up without both flags set, and the gate rejected it.
+    /// Like GoldenNugget, this matches on the address actually
+    /// configured (never loopback, never link-local), not on flags.
+    /// Phase 2 — does lockdownd actually answer on the tunnel? — is
+    /// LockdownProbe.probe, run by "Refresh device status".
     static func vpnTunnelActive() -> Bool {
         var addrs: UnsafeMutablePointer<ifaddrs>?
         guard getifaddrs(&addrs) == 0, let first = addrs else { return false }
         defer { freeifaddrs(addrs) }
         for ptr in sequence(first: first, next: { $0.pointee.ifa_next }) {
-            let flags = Int32(ptr.pointee.ifa_flags)
-            guard flags & IFF_UP != 0, flags & IFF_RUNNING != 0,
-                  let sa = ptr.pointee.ifa_addr,
-                  sa.pointee.sa_family == UInt8(AF_INET) || sa.pointee.sa_family == UInt8(AF_INET6)
-            else { continue }
+            guard let sa = ptr.pointee.ifa_addr else { continue }
+            let family = sa.pointee.sa_family
+            guard family == UInt8(AF_INET) || family == UInt8(AF_INET6) else { continue }
             let name = String(cString: ptr.pointee.ifa_name)
-            if name.hasPrefix("utun") { return true }
+            guard name.hasPrefix("utun") else { continue }
+            var host = [CChar](repeating: 0, count: Int(NI_MAXHOST))
+            let len = family == UInt8(AF_INET) ? socklen_t(MemoryLayout<sockaddr_in>.size)
+                                              : socklen_t(MemoryLayout<sockaddr_in6>.size)
+            guard getnameinfo(sa, len, &host, socklen_t(host.count),
+                              nil, 0, NI_NUMERICHOST) == 0 else { continue }
+            let addr = String(cString: host)
+            // Loopback and link-local are never a VPN tunnel.
+            if addr == "127.0.0.1" || addr == "::1" { continue }
+            if addr.hasPrefix("fe80") || addr.hasPrefix("FE80") { continue }
+            return true
         }
         return false
     }
@@ -486,12 +472,6 @@ enum FeatureCatalog {
             route: .partialRestore,
             window: ios16to26),
     ]
-
-    static var sections: [String] {
-        var seen: [String] = []
-        for f in all where !seen.contains(f.section) { seen.append(f.section) }
-        return seen
-    }
 
     /// Features grouped once at first use (order within each
     /// section preserved); page bodies ask for their section on

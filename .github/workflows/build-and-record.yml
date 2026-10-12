@@ -26,6 +26,26 @@ jobs:
       - name: Install XcodeGen
         run: brew install xcodegen
 
+      - name: Build idevice FFI (Rust, for iOS 27 pairing)
+        run: |
+          # Install Rust if needed
+          if ! command -v cargo &> /dev/null; then
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
+            source "$HOME/.cargo/env"
+          fi
+          export PATH="$HOME/.cargo/bin:$PATH"
+          rustup target add aarch64-apple-ios
+          # Shallow clone the idevice repo
+          git clone --depth 1 https://github.com/jkcoxson/idevice.git /tmp/idevice
+          cd /tmp/idevice/ffi
+          # Build staticlib for iOS (device only; simulator not needed)
+          cargo build --target aarch64-apple-ios --release \
+            --no-default-features --features remote_pairing,rustcrypto --lib
+          mkdir -p "$GITHUB_WORKSPACE/WorkSlop/Libs"
+          cp /tmp/idevice/target/aarch64-apple-ios/release/libidevice_ffi.a \
+             "$GITHUB_WORKSPACE/WorkSlop/Libs/"
+          ls -la "$GITHUB_WORKSPACE/WorkSlop/Libs/"
+
       - name: Generate project
         run: xcodegen generate
 

@@ -94,7 +94,38 @@ struct Pairing27View: View {
     }
 }
 
-// MARK: - Controller
-//
-// The real implementation lives in Pairing27Controller.swift (FFI to
-// libidevice_ffi.a). This file is UI only.
+// MARK: - Controller (scaffolding)
+
+/// Controller for the iOS 27 pairable-host flow.
+///
+/// HONEST STATUS: the UI, Bonjour advertising, and TCP listener scaffolding
+/// are here. The RemotePairing pair-setup handshake (SRP + PIN verification)
+/// requires the vendored `jkcoxson/idevice` FFI library (MIT) — that
+/// integration is not yet done. Until then, `start()` advertises and listens,
+/// but the handshake cannot complete.
+final class Pairing27Controller: ObservableObject {
+    enum State: Equatable {
+        case idle
+        case advertising
+        case pin(String)
+        case done
+        case failed(String)
+
+        var isDone: Bool {
+            if case .done = self { return true }
+            return false
+        }
+    }
+
+    @Published var state: State = .idle
+
+    func start() {
+        // TODO: integrate jkcoxson/idevice pairable_host FFI.
+        // For now, mark the honest limitation.
+        state = .failed("Pairing protocol not yet integrated — needs the idevice library. Use Import on iOS 26, or wait for the next update.")
+    }
+
+    func stop() {
+        state = .idle
+    }
+}

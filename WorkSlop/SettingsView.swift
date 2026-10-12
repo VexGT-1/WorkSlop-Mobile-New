@@ -99,9 +99,6 @@ struct SettingsView: View {
             Section {
                 LabeledContent("Developer", value: "adnan.120hz")
                 Link("TikTok @adnan.120hz", destination: URL(string: "https://www.tiktok.com/@adnan.120hz")!)
-                Text("UI reference: Nugget UI")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
                 Text("iOS 18 icon pack: catwithabaloon (v2.0)")
                     .font(.footnote)
                     .foregroundStyle(.secondary)

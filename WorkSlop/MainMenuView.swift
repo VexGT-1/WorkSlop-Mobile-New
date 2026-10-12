@@ -17,7 +17,6 @@ struct MainMenuView: View {
     @EnvironmentObject private var selection: SelectionStore
     @State private var path: [HomeRoute] = []
     @State private var importing = false
-    @State private var showingPairing27 = false
     @State private var pairingNote: String?
     @State private var showTunnelInfo = false
     @State private var showAbout = false
@@ -70,7 +69,6 @@ struct MainMenuView: View {
         }
         .sheet(isPresented: $showTunnelInfo) { TunnelInfoView() }
         .sheet(isPresented: $showAbout) { AboutInfoView() }
-        .sheet(isPresented: $showingPairing27) { Pairing27View() }
     }
 
     // MARK: - Hero
@@ -139,24 +137,6 @@ struct MainMenuView: View {
             }
             .font(.subheadline)
             .padding(.bottom, 4)
-
-            // iOS 27+: get pairing file directly via Developer Mode (no computer).
-            // Below iOS 27: locked.
-            if DeviceInfo.iosVersion.major >= 27 {
-                Button {
-                    showingPairing27 = true
-                } label: {
-                    Label("Get pairing file (iOS 27)", systemImage: "wifi")
-                }
-                .font(.subheadline)
-                .accessibilityIdentifier("get-pairing-27")
-                .padding(.bottom, 4)
-            } else {
-                Label("Get pairing file (iOS 27 only)", systemImage: "lock.fill")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .padding(.bottom, 4)
-            }
 
             if let pairingNote {
                 Text(pairingNote)

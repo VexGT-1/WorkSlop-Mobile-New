@@ -49,9 +49,6 @@ targets:
         CURRENT_PROJECT_VERSION: "1"
         SWIFT_VERSION: "5.0"
         TARGETED_DEVICE_FAMILY: "1,2"
-        SWIFT_OBJC_BRIDGING_HEADER: WorkSlop/WorkSlop-Bridging-Header.h
-        LIBRARY_SEARCH_PATHS: $(PROJECT_DIR)/WorkSlop/Libs
-        OTHER_LDFLAGS: -lidevice_ffi
   WorkSlopUITests:
     type: bundle.ui-testing
     platform: iOS

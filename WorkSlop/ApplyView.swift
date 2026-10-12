@@ -127,39 +127,6 @@ struct ApplyView: View {
                 .frame(maxWidth: .infinity)
                 .disabled(!canStart || running)
                 .accessibilityIdentifier("apply-now")
-            }
-            .sheet(isPresented: $showRestartSheet) {
-                NavigationStack {
-                    List {
-                        Section {
-                            Label("Apply complete", systemImage: "checkmark.circle.fill")
-                                .foregroundStyle(Color.green)
-                                .font(.headline)
-                            Text("The device confirmed every phase. Now restart your iPhone so SpringBoard picks up the new files.")
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                        }
-                        Section("How to restart") {
-                            Label("Open Settings → General → Shut Down", systemImage: "1.circle")
-                            Label("Slide to power off, wait 10 seconds", systemImage: "2.circle")
-                            Label("Hold the side button until the Apple logo appears", systemImage: "3.circle")
-                            Label("After reboot, check that your tweaks are active", systemImage: "4.circle")
-                        }
-                        Section {
-                            Text("If a tweak didn't take effect, re-run Apply — the engine re-sends only what's needed.")
-                                .font(.footnote)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    .navigationTitle("Restart your iPhone")
-                    .navigationBarTitleDisplayMode(.inline)
-                    .toolbar {
-                        ToolbarItem(placement: .confirmationAction) {
-                            Button("Done") { showRestartSheet = false }
-                        }
-                    }
-                }
-            }
 
                 if running {
                     Button("Cancel (between phases only)", role: .destructive) {
@@ -173,6 +140,39 @@ struct ApplyView: View {
             }
         }
         .navigationTitle("Apply")
+        .navigationBarTitleDisplayMode(.inline)
+        .sheet(isPresented: $showRestartSheet) {
+            NavigationStack {
+                List {
+                    Section {
+                        Label("Apply complete", systemImage: "checkmark.circle.fill")
+                            .foregroundStyle(Color.green)
+                            .font(.headline)
+                        Text("The device confirmed every phase. Now restart your iPhone so SpringBoard picks up the new files.")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                    Section("How to restart") {
+                        Label("Open Settings → General → Shut Down", systemImage: "1.circle")
+                        Label("Slide to power off, wait 10 seconds", systemImage: "2.circle")
+                        Label("Hold the side button until the Apple logo appears", systemImage: "3.circle")
+                        Label("After reboot, check that your tweaks are active", systemImage: "4.circle")
+                    }
+                    Section {
+                        Text("If a tweak didn't take effect, re-run Apply — the engine re-sends only what's needed.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .navigationTitle("Restart your iPhone")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Done") { showRestartSheet = false }
+                    }
+                }
+            }
+        }
         .navigationBarTitleDisplayMode(.inline)
     }
 

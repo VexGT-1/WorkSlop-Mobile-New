@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// SkyBackground: the desktop's animated white-blue canvas, ported.
 ///

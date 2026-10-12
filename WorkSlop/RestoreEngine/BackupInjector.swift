@@ -365,8 +365,7 @@ struct BackupInjector {
                 dirRowsAdded += advanced.added
 
                 // Mode normalize (desktop): regular file, 0644-style.
-                var mode = 0o100644
-                if mode & 0o777 == 0 { mode |= 0o644 }
+                let mode = 0o100644
 
                 // The inode MUST be unique per row — never the donor's.
                 let blob = MBFileBlob.file(

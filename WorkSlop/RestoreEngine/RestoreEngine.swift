@@ -10,7 +10,7 @@ struct RestoreRequest: Sendable {
     /// Build number from lockdown ("24A5355q"); nil when the caller
     /// couldn't read it — the version gate still applies (all 27.0
     /// variants report ProductVersion "27.0").
-    let deviceBuild: String? = nil
+    let deviceBuild: String?
     /// Feature IDs the user staged (from PayloadSpec catalog).
     let stagedFeatureIDs: Set<String>
     /// Find My cannot be verified from the sandbox; the user attests it.
@@ -18,7 +18,7 @@ struct RestoreRequest: Sendable {
     let findMyDisabledAttested: Bool
     /// The iOS 27 bootloop risk warning was shown and explicitly accepted.
     /// Fail-closed: BackupPhase refuses the run without it.
-    let riskWarningAccepted: Bool = false
+    let riskWarningAccepted: Bool
     /// Label for the staging directory (UDID when known, else "device").
     let deviceLabel: String
     let backupPassword: String?
@@ -120,7 +120,7 @@ func withIOWatchdog<T>(
     operation: String,
     stallSeconds: TimeInterval = 300,
     onStall: (@Sendable () async -> Void)? = nil,
-    body: @Sendable (@Sendable () -> Void) async throws -> T
+    body: @escaping @Sendable (@Sendable () -> Void) async throws -> T
 ) async throws -> T {
     let activity = IOActivity()
     return try await withThrowingTaskGroup(of: T.self) { group in

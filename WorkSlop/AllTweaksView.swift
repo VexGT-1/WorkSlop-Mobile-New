@@ -45,11 +45,18 @@ struct TweakGroup: Identifiable, Hashable {
     let icon: String
     let footer: String?
 
+    /// The catalog section this row reads. The menu label stays
+    /// user-facing ("Apple Internal"); the catalog calls it
+    /// "Internal Options".
+    var catalogSection: String {
+        id == "Apple Internal" ? "Internal Options" : id
+    }
+
     var count: Int {
         switch id {
         case "Custom Icons": return IOS18IconCatalog.tintedIcons.count + CustomIconStore.load().count
         case "PosterBoard": return FeatureCatalog.features(in: "PosterBoard").count
-        default: return FeatureCatalog.features(in: id).count
+        default: return FeatureCatalog.features(in: catalogSection).count
         }
     }
 }
@@ -65,7 +72,7 @@ struct TweakListView: View {
                 customIcons
             } else {
                 Section {
-                    ForEach(FeatureCatalog.features(in: group.id)) { feature in
+                    ForEach(FeatureCatalog.features(in: group.catalogSection)) { feature in
                         FeatureToggleRow(feature: feature)
                     }
                     if group.id == "Status Bar" {

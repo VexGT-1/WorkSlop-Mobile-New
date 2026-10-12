@@ -161,11 +161,13 @@ struct ApplyView: View {
         )
         Task {
             do {
+                // The engine's progress closure is @Sendable; marking ours
+                // @MainActor makes it Sendable (global-actor-isolated
+                // closures are always safe to share) and keeps the @State
+                // write on the main thread.
                 try await RestoreEngine.shared.start(
                     request: request,
-                    onProgress: { p in
-                        Task { @MainActor in self.progress = p }
-                    }
+                    onProgress: { @MainActor p in self.progress = p }
                 )
                 await MainActor.run {
                     self.running = false

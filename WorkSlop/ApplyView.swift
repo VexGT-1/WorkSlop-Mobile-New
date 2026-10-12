@@ -33,7 +33,7 @@ struct ApplyView: View {
 
     var body: some View {
         List {
-            Section("Preflight") {
+            Section {
                 preflightRow("Tweaks staged", ok: !selection.staged.isEmpty,
                              detail: "\(selection.staged.count)")
                 preflightRow("Pairing file imported", ok: status.pairingImported, detail: nil)
@@ -50,6 +50,8 @@ struct ApplyView: View {
                 SecureField("Backup password (only if the backup is encrypted)", text: $backupPassword)
                     .accessibilityIdentifier("backup-password")
                     .disabled(running)
+            } header: {
+                Text("Preflight")
             } footer: {
                 Text(routeText)
             }
@@ -150,12 +152,12 @@ struct ApplyView: View {
         progress = nil
         let request = RestoreRequest(
             deviceVersion: version,
+            deviceBuild: DeviceInfoEx.buildNumber,
             stagedFeatureIDs: selection.staged,
             findMyDisabledAttested: findMyOff,
+            riskWarningAccepted: riskAccepted,
             deviceLabel: "device",
-            backupPassword: backupPassword.isEmpty ? nil : backupPassword,
-            deviceBuild: DeviceInfoEx.buildNumber,
-            riskWarningAccepted: riskAccepted
+            backupPassword: backupPassword.isEmpty ? nil : backupPassword
         )
         Task {
             do {

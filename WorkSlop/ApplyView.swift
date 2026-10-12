@@ -152,12 +152,12 @@ struct ApplyView: View {
         progress = nil
         let request = RestoreRequest(
             deviceVersion: version,
-            deviceBuild: DeviceInfoEx.buildNumber,
             stagedFeatureIDs: selection.staged,
             findMyDisabledAttested: findMyOff,
-            riskWarningAccepted: riskAccepted,
             deviceLabel: "device",
-            backupPassword: backupPassword.isEmpty ? nil : backupPassword
+            backupPassword: backupPassword.isEmpty ? nil : backupPassword,
+            deviceBuild: DeviceInfoEx.buildNumber,
+            riskWarningAccepted: riskAccepted
         )
         Task {
             do {

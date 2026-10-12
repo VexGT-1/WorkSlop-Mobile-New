@@ -22,6 +22,25 @@ struct RestoreRequest: Sendable {
     /// Label for the staging directory (UDID when known, else "device").
     let deviceLabel: String
     let backupPassword: String?
+
+    /// Explicit init: the synthesized memberwise order is fragile when
+    /// defaulted properties sit mid-struct, so the order is fixed here
+    /// with the optional tail defaulted.
+    init(deviceVersion: DeviceVersion,
+         stagedFeatureIDs: Set<String>,
+         findMyDisabledAttested: Bool,
+         deviceLabel: String,
+         backupPassword: String?,
+         deviceBuild: String? = nil,
+         riskWarningAccepted: Bool = false) {
+        self.deviceVersion = deviceVersion
+        self.deviceBuild = deviceBuild
+        self.stagedFeatureIDs = stagedFeatureIDs
+        self.findMyDisabledAttested = findMyDisabledAttested
+        self.riskWarningAccepted = riskWarningAccepted
+        self.deviceLabel = deviceLabel
+        self.backupPassword = backupPassword
+    }
 }
 
 // MARK: - Engine state

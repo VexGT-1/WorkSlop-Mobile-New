@@ -35,13 +35,15 @@ struct StatusBarDetailView: View {
                 }
             }
 
-            Section("Master") {
+            Section {
                 Toggle("Enable Status Bar Modifications", isOn: $store.masterOn)
                     .accessibilityIdentifier("sb-enable")
                 Toggle("Full Signal Bars (No SIM Visual)", isOn: $store.fullSignal)
                     .disabled(!status.unlocked || isIOS27)
                 Toggle("Silly Mode", isOn: $store.sillyMode)
                     .disabled(!status.unlocked || isIOS27)
+            } header: {
+                Text("Master")
             } footer: {
                 Text(isIOS27
                     ? "On iOS 27 the classic statusBarOverrides file is no longer read, so only the carrier names below can still change (StatusBarOverrides.archive)."

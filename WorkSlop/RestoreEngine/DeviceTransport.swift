@@ -99,18 +99,23 @@ actor LoopbackTransport: DeviceTransport {
 
         let mb2 = MobileBackup2Client(port: port)
         await mb2.setCancelled { Task.isCancelled }
-        defer { mb2.disconnect() }
-        _ = try await mb2.connect()
-        let count = try await mb2.runBackup(
-            targetID: udid, sourceID: udid, password: backupPassword,
-            to: stagingDir,
-            progress: { f, _ in if f >= 0 { progress(f) } })
-        // A pulled backup that yielded zero files is not a backup.
-        guard count > 0 else {
-            throw RestoreError.phaseFailed(
-                phase: .backup, message: "device sent zero files; refusing to continue on an empty pull")
+        do {
+            _ = try await mb2.connect()
+            let count = try await mb2.runBackup(
+                targetID: udid, sourceID: udid, password: backupPassword,
+                to: stagingDir,
+                progress: { f, _ in if f >= 0 { progress(f) } })
+            // A pulled backup that yielded zero files is not a backup.
+            guard count > 0 else {
+                throw RestoreError.phaseFailed(
+                    phase: .backup, message: "device sent zero files; refusing to continue on an empty pull")
+            }
+            await mb2.disconnect()
+            return stagingDir
+        } catch {
+            await mb2.disconnect()
+            throw error
         }
-        return stagingDir
     }
 
     func pushFullRestore(from backupRoot: URL,
@@ -132,26 +137,31 @@ actor LoopbackTransport: DeviceTransport {
 
         let mb2 = MobileBackup2Client(port: port)
         await mb2.setCancelled { Task.isCancelled }
-        defer { mb2.disconnect() }
-        _ = try await mb2.connect()
+        do {
+            _ = try await mb2.connect()
 
-        let fileIDMap = patch.fileIDMap
-        let confirmed = try await mb2.runRestore(
-            targetID: udid, sourceID: udid, password: backupPassword,
-            from: backupRoot,
-            fileResolver: { [backupRoot] path in
-                let direct = backupRoot.appendingPathComponent(path)
-                if FileManager.default.fileExists(atPath: direct.path) { return direct }
-                return fileIDMap[path]
-            },
-            progress: { f, _ in if f >= 0 { progress(f) } })
+            let fileIDMap = patch.fileIDMap
+            let confirmed = try await mb2.runRestore(
+                targetID: udid, sourceID: udid, password: backupPassword,
+                from: backupRoot,
+                fileResolver: { [backupRoot] path in
+                    let direct = backupRoot.appendingPathComponent(path)
+                    if FileManager.default.fileExists(atPath: direct.path) { return direct }
+                    return fileIDMap[path]
+                },
+                progress: { f, _ in if f >= 0 { progress(f) } })
 
-        lastRestoreDeviceConfirmed = confirmed
-        guard confirmed else {
-            // Unreachable in practice (runRestore throws on ErrorCode != 0),
-            // kept as a second gate: never report success without the device.
-            throw RestoreError.phaseFailed(
-                phase: .restore, message: "The device did not confirm the restore landed.")
+            lastRestoreDeviceConfirmed = confirmed
+            guard confirmed else {
+                // Unreachable in practice (runRestore throws on ErrorCode != 0),
+                // kept as a second gate: never report success without the device.
+                throw RestoreError.phaseFailed(
+                    phase: .restore, message: "The device did not confirm the restore landed.")
+            }
+            await mb2.disconnect()
+        } catch {
+            await mb2.disconnect()
+            throw error
         }
     }
 

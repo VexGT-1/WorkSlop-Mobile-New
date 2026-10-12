@@ -29,15 +29,17 @@ struct AllFeaturesView: View {
                 Text("SolariumForceFallback is read live by DesignLibrary from com.apple.SwiftUI on iOS 26.6.1 (firmware-verified). Its on-screen effect is not proven - an isolated device test decides it (full backup first, Low Power Mode off, reboot after apply).")
             }
 
-            Section("Liquid Glass") {
+            Section {
                 ForEach(liquidGlassRegular) { feature in
                     FeatureToggleRow(feature: feature)
                 }
+            } header: {
+                Text("Liquid Glass")
             } footer: {
                 Text("Partial restore on iOS 26, Full backup \u{2192} modify \u{2192} restore on iOS 27 - the same split as desktop.")
             }
 
-            Section("Status Bar") {
+            Section {
                 ForEach(FeatureCatalog.features(in: "Status Bar")) { feature in
                     FeatureToggleRow(feature: feature)
                 }
@@ -47,6 +49,8 @@ struct AllFeaturesView: View {
                     Label("Status Bar details", systemImage: "antenna.radiowaves.left.and.right")
                 }
                 .accessibilityIdentifier("nav-statusbar-details")
+            } header: {
+                Text("Status Bar")
             } footer: {
                 Text("Target: Library/SpringBoard/statusBarOverrides - a fixed 3,944-byte struct, not a plist (firmware-audited on iOS 26.6.1). The full-bars look without a SIM is visual only; it does not restore cellular service.")
             }
@@ -57,31 +61,37 @@ struct AllFeaturesView: View {
                 }
             }
 
-            Section("Daemons") {
+            Section {
                 ForEach(FeatureCatalog.features(in: "Daemons")) { feature in
                     FeatureToggleRow(feature: feature)
                 }
+            } header: {
+                Text("Daemons")
             } footer: {
                 Text("Daemon toggles stage the same disabled-daemons list the desktop manages.")
             }
 
-            Section("Recommended") {
+            Section {
                 ForEach(FeatureCatalog.features(in: "Recommended")) { feature in
                     FeatureToggleRow(feature: feature)
                 }
+            } header: {
+                Text("Recommended")
             } footer: {
                 Text("The desktop one-tap Recommended analytics set, as individual switches.")
             }
 
-            Section("Apple Internal") {
+            Section {
                 ForEach(FeatureCatalog.features(in: "Internal Options")) { feature in
                     FeatureToggleRow(feature: feature)
                 }
+            } header: {
+                Text("Apple Internal")
             } footer: {
                 Text("Internal debug switches from Apple's own preference domains. Only keys verified in the iOS firmware are listed.")
             }
 
-            Section("PosterBoard") {
+            Section {
                 ForEach(FeatureCatalog.features(in: "PosterBoard")) { feature in
                     FeatureToggleRow(feature: feature)
                 }
@@ -91,40 +101,50 @@ struct AllFeaturesView: View {
                     Label("Manage files", systemImage: "photo.on.rectangle")
                 }
                 .accessibilityIdentifier("nav-posterboard-files")
+            } header: {
+                Text("PosterBoard")
             } footer: {
                 Text("Descriptors ride the Partial restore route (max iOS 26), like the desktop Descriptors mode.")
             }
 
-            Section("Custom Icons") {
+            Section {
                 ForEach(FeatureCatalog.features(in: "Custom Icons")) { feature in
                     FeatureToggleRow(feature: feature)
                 }
+            } header: {
+                Text("Custom Icons")
             } footer: {
                 Text("With this on and at least one complete icon below, the staging payload built on disk gains one WorkSlop .webclip folder per app (Info.plist + icon.png). Nothing is on the Home Screen until the restore engine delivers it.")
             }
 
             YourIconsSection()
 
-            Section("Dark") {
+            Section {
                 ForEach(IOS18IconCatalog.darkIcons) { icon in
                     GalleryRow(icon: icon, variant: .dark)
                 }
+            } header: {
+                Text("Dark")
             } footer: {
                 Text("The same apps in their iOS 18 dark-mode artwork. Tap one to stage it with its real name and bundle ID.")
             }
 
-            Section("Light") {
+            Section {
                 ForEach(IOS18IconCatalog.all) { icon in
                     GalleryRow(icon: icon, variant: .light)
                 }
+            } header: {
+                Text("Light")
             } footer: {
                 Text("The iOS 18 stock icons from your icon pack.")
             }
 
-            Section("Tinted") {
+            Section {
                 ForEach(IOS18IconCatalog.tintedIcons) { icon in
                     GalleryRow(icon: icon, variant: .tinted)
                 }
+            } header: {
+                Text("Tinted")
             } footer: {
                 Text("The same apps in their iOS 18 tinted artwork.")
             }
@@ -384,7 +404,7 @@ private struct YourIconsSection: View {
     @State private var editingIndex: Int?
 
     var body: some View {
-        Section("Your Icons") {
+        Section {
             ForEach(stage.entries.indices, id: \.self) { i in
                 HStack(spacing: 12) {
                     if let data = stage.entries[i].imageData,
@@ -417,6 +437,8 @@ private struct YourIconsSection: View {
                 editingIndex = stage.addBlank()
             }
             .accessibilityIdentifier("icons-add")
+        } header: {
+            Text("Your Icons")
         } footer: {
             Text("Pick an image, fill the app name and its bundle ID (for example com.apple.mobilesafari). Staged icons are written as Home Screen web clips by the same restore payload as the desktop icon themes.")
         }

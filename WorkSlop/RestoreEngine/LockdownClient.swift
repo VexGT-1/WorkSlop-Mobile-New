@@ -280,8 +280,8 @@ private final class StreamSocket: @unchecked Sendable {
                 // verifiable without a device.
                 kCFStreamSSLCertificates: [identity] as CFArray,
             ]
-            guard CFReadStreamSetProperty(r, kCFStreamPropertySSLSettings, settings as CFDictionary),
-                  CFWriteStreamSetProperty(w, kCFStreamPropertySSLSettings, settings as CFDictionary)
+            guard CFReadStreamSetProperty(r, CFStreamPropertyKey(rawValue: kCFStreamPropertySSLSettings), settings as CFDictionary),
+                  CFWriteStreamSetProperty(w, CFStreamPropertyKey(rawValue: kCFStreamPropertySSLSettings), settings as CFDictionary)
             else { throw LockdownError.tlsFailed("could not set kCFStreamPropertySSLSettings") }
             // The handshake is driven by the next read/write (the following
             // lockdown message). Failures surface there as I/O errors.
@@ -529,12 +529,24 @@ actor LockdownClient {
         // Unencrypted PFX: empty options (no passphrase needed).
         let status = SecPKCS12Import(pfx as CFData, [:] as CFDictionary, &items)
         guard status == errSecSuccess,
-              let arr = items as? [[String: Any]],
-              let secID = arr.first?[kSecImportItemIdentity as String] as? SecIdentity
+              let cfItems = items, CFArrayGetCount(cfItems) > 0
         else {
             throw LockdownError.tlsFailed("SecPKCS12Import failed: \(status)")
         }
-        return secID
+        // Read the identity out at the CF level (no Swift downcast): the
+        // import dictionary is documented to hold a SecIdentity under
+        // kSecImportItemIdentity, and the type ID is verified before use.
+        let rawDict = CFArrayGetValueAtIndex(cfItems, 0)!
+        let dict = Unmanaged<CFDictionary>.fromOpaque(rawDict).takeUnretainedValue()
+        let keyPtr = Unmanaged.passUnretained(kSecImportItemIdentity).toOpaque()
+        guard let rawValue = CFDictionaryGetValue(dict, keyPtr) else {
+            throw LockdownError.tlsFailed("SecPKCS12Import returned no identity")
+        }
+        let value = Unmanaged<AnyObject>.fromOpaque(rawValue).takeUnretainedValue()
+        guard CFGetTypeID(value) == SecIdentityGetTypeID() else {
+            throw LockdownError.tlsFailed("SecPKCS12Import returned a non-identity value")
+        }
+        return Unmanaged<SecIdentity>.fromOpaque(rawValue).takeUnretainedValue()
     }
 
     // MARK: reboot (diagnostics_relay "Restart" — diagnostics_relay.c)

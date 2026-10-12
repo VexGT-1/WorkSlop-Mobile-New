@@ -15,10 +15,18 @@ struct WorkSlopApp: App {
         return (16...27).contains(v.major)
     }
 
+    /// `-DemoScreen <name>` deep-links screenshot runs straight to a
+    /// menu (home|settings|statusbar|posterboard). Nil on normal launches.
+    private var demoScreen: String? {
+        let args = ProcessInfo.processInfo.arguments
+        guard let i = args.firstIndex(of: "-DemoScreen"), i + 1 < args.count else { return nil }
+        return args[i + 1]
+    }
+
     var body: some Scene {
         WindowGroup {
             if iosSupported {
-                ContentView()
+                ContentView(demoScreen: demoScreen)
                     .sheet(isPresented: $showIntro) { IntroView() }
                     .onAppear {
                         // Demo/screenshot runs (-DemoIOS26) land

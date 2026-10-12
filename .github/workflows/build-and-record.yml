@@ -1,7 +1,7 @@
 name: Build IPA
 
-# Builds the unsigned device IPA and uploads it as the ONLY artifact.
-# Deliberately no screenshots, no recordings, no extra outputs.
+# Builds the unsigned device IPA and uploads it as the ONLY artifact,
+# plus optional menu screenshots on request. No recordings, ever.
 on:
   workflow_dispatch:
     inputs:
@@ -76,17 +76,27 @@ jobs:
           xcrun simctl bootstatus "$SIM_ID" -b || true
           APP="${{ runner.temp }}/SimDD/Build/Products/Debug-iphonesimulator/WorkSlop.app"
           xcrun simctl install "$SIM_ID" "$APP"
-          xcrun simctl launch --terminate-running-process "$SIM_ID" com.adnan120hz.workslop -DemoIOS26 -uiStyle ${{ inputs.proof_style }} || true
-          sleep 4
-          xcrun simctl io "$SIM_ID" screenshot ${{ runner.temp }}/proof-home.png
-          ls -la ${{ runner.temp }}/proof-home.png
+          # One screenshot per menu: home, settings table, status-bar
+          # details, posterboard files. Screenshots only — no recording.
+          for spec in "home:" "settings:settings" "statusbar:statusbar" "posterboard:posterboard"; do
+            name="${spec%%:*}"
+            screen="${spec#*:}"
+            if [ -n "$screen" ]; then
+              xcrun simctl launch --terminate-running-process "$SIM_ID" com.adnan120hz.workslop -DemoIOS26 -DemoScreen "$screen" -uiStyle ${{ inputs.proof_style }} || true
+            else
+              xcrun simctl launch --terminate-running-process "$SIM_ID" com.adnan120hz.workslop -DemoIOS26 -uiStyle ${{ inputs.proof_style }} || true
+            fi
+            sleep 4
+            xcrun simctl io "$SIM_ID" screenshot "${{ runner.temp }}/proof-${name}.png"
+          done
+          ls -la ${{ runner.temp }}/proof-*.png
 
       - name: Upload proof shots
         if: ${{ inputs.proof_shot }}
         uses: actions/upload-artifact@v4
         with:
           name: ProofShots
-          path: ${{ runner.temp }}/proof-home.png
+          path: ${{ runner.temp }}/proof-*.png
           if-no-files-found: warn
 
       - name: Upload IPA

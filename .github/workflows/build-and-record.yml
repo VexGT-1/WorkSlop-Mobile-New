@@ -1,6 +1,8 @@
 name: Build IPA
 
-# Builds the unsigned device IPA and uploads it as the ONLY artifact.
+# Builds the unsigned device IPA and uploads it as an artifact.
+# The full xcodebuild log is ALWAYS uploaded too, so a failed build
+# leaves a downloadable log to send back for fixing.
 # No simulator, no recordings, ever.
 on:
   workflow_dispatch:
@@ -29,12 +31,14 @@ jobs:
 
       - name: Build device IPA (unsigned, for sideload testing)
         run: |
+          set -o pipefail
           xcodebuild -project WorkSlop.xcodeproj \
             -scheme WorkSlop \
             -configuration Release \
             -destination 'generic/platform=iOS' \
             -derivedDataPath ${{ runner.temp }}/DerivedData \
-            build CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY=""
+            build CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            2>&1 | tee ${{ runner.temp }}/xcodebuild.log
           APP="${{ runner.temp }}/DerivedData/Build/Products/Release-iphoneos/WorkSlop.app"
           test -d "$APP"
           IPA_DIR="${{ runner.temp }}/ipa-staging"
@@ -42,6 +46,14 @@ jobs:
           cp -R "$APP" "$IPA_DIR/Payload/"
           (cd "$IPA_DIR" && /usr/bin/zip -qry ${{ runner.temp }}/WorkSlop-unsigned.ipa Payload)
           ls -la ${{ runner.temp }}/WorkSlop-unsigned.ipa
+
+      - name: Upload build log (always, for debugging failures)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: BuildLog
+          path: ${{ runner.temp }}/xcodebuild.log
+          if-no-files-found: warn
 
       - name: Upload IPA
         if: always()

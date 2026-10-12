@@ -129,7 +129,7 @@ actor LoopbackTransport: DeviceTransport {
                 onStall: { await mb2.disconnect() }
             ) { tick in
                 try await mb2.runBackup(
-                    targetID: udid, sourceID: udid, password: backupPassword,
+                    targetID: udid, sourceID: udid, password: self.backupPassword,
                     to: stagingDir,
                     progress: { f, _ in tick(); if f >= 0 { progress(f) } })
             }
@@ -174,7 +174,7 @@ actor LoopbackTransport: DeviceTransport {
                 onStall: { await mb2.disconnect() }
             ) { tick in
                 try await mb2.runRestore(
-                    targetID: udid, sourceID: udid, password: backupPassword,
+                    targetID: udid, sourceID: udid, password: self.backupPassword,
                     from: backupRoot,
                     fileResolver: { [backupRoot] path in
                         let direct = backupRoot.appendingPathComponent(path)
@@ -267,7 +267,7 @@ actor LoopbackTransport: DeviceTransport {
                 onStall: { await mb2.disconnect() }
             ) { tick in
                 try await mb2.runPartialRestore(
-                    targetID: udid, sourceID: udid, password: backupPassword,
+                    targetID: udid, sourceID: udid, password: self.backupPassword,
                     from: backupRoot,
                     progress: { f, _ in tick(); if f >= 0 { progress(f) } })
             }

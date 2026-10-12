@@ -45,10 +45,11 @@ enum PayloadBuilder {
         for spec in PayloadSpecCatalog.all where staged.contains(spec.featureID) {
             for write in spec.writes {
                 if let target = write.fileTarget {
-                    // pb-reset and dm-clear-screentime ARE handled by
-                    // the dedicated zero-byte blocks below - warning
-                    // here would contradict the files actually built.
-                    if spec.featureID != "pb-reset" && spec.featureID != "dm-clear-screentime" {
+                    // pb-reset, dm-clear-screentime, and pb-tendies ARE
+                    // handled by dedicated blocks below - warning here
+                    // would contradict the files actually built.
+                    if spec.featureID != "pb-reset" && spec.featureID != "dm-clear-screentime"
+                        && spec.featureID != "pb-tendies" {
                         warnings.append("\(spec.featureID): targets \(target) - depends on a desktop page setting, toggle alone has no fixed payload.")
                     }
                     continue
@@ -160,6 +161,41 @@ enum PayloadBuilder {
                         keys: ["icon.png (\(png.count) bytes)"], url: url))
                 } else {
                     warnings.append("custom-icons: skipped icon file for \(entry.bundleID) (no icon data) - Info.plist still staged, like desktop.")
+                }
+            }
+        }
+
+        // PosterBoard .tendies delivery (desktop posterboard_tweak.py,
+        // descriptors mode): imported .tendies zips are extracted and
+        // their descriptor files routed to AppDomain-com.apple.PosterBoard
+        // under PRBPosterExtensionDataStore/{structure}/Extensions/{ext}/
+        // descriptors. Cap: 5 .tendies files per restore (desktop
+        // MAX_TENDIES_PER_RESTORE) - extras are warned and skipped.
+        if staged.contains("pb-tendies") {
+            let tendiesDir = TendiesStore.dir(kind: "Tendies")
+            let zips = (try? FileManager.default.contentsOfDirectory(
+                at: tendiesDir, includingPropertiesForKeys: nil)
+                .filter { $0.pathExtension.lowercased() == "tendies" }
+                .sorted(by: { $0.lastPathComponent < $1.lastPathComponent })) ?? []
+            if zips.isEmpty {
+                warnings.append("pb-tendies: staged but no .tendies files imported - nothing to deliver.")
+            } else {
+                if zips.count > PosterBoardExtractor.maxTendiesPerRestore {
+                    warnings.append("pb-tendies: \(zips.count) files imported, only the first \(PosterBoardExtractor.maxTendiesPerRestore) are delivered per restore (desktop cap).")
+                }
+                for zip in zips.prefix(PosterBoardExtractor.maxTendiesPerRestore) {
+                    let (extracted, extractWarnings) = PosterBoardExtractor.extract(
+                        tendiesURL: zip,
+                        structureVersion: PayloadSpecCatalog.pbStructure,
+                        stagingDir: dir)
+                    warnings.append(contentsOf: extractWarnings)
+                    for e in extracted {
+                        files.append(BuiltFile(
+                            domain: PosterBoardExtractor.domain,
+                            restorePath: e.restorePath,
+                            keys: ["\(e.localURL.lastPathComponent)"],
+                            url: e.localURL))
+                    }
                 }
             }
         }

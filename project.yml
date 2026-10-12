@@ -3,6 +3,10 @@ options:
   bundleIdPrefix: com.adnan120hz
   deploymentTarget:
     iOS: "16.0"
+packages:
+  ZIPFoundation:
+    url: https://github.com/weichsel/ZIPFoundation.git
+    from: 0.9.0
 targets:
   WorkSlop:
     type: application
@@ -36,6 +40,7 @@ targets:
         type: folder
     dependencies:
       - sdk: libsqlite3.tbd
+      - package: ZIPFoundation
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.adnan120hz.workslop

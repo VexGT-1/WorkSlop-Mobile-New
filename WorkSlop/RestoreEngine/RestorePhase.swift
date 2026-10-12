@@ -17,7 +17,7 @@ enum RestorePhase {
         backupRoot: URL,
         transport: DeviceTransport,
         watchdog: StallWatchdog,
-        progress: @Sendable (RestoreProgress) -> Void,
+        progress: @Sendable @escaping (RestoreProgress) -> Void,
         isCancelled: @Sendable () -> Bool
     ) async throws {
         progress(RestoreProgress(phase: .restore, fraction: 0.05, message: "Pushing full restore…"))

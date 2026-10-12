@@ -18,7 +18,7 @@ enum BackupPhase {
         stagingRoot: URL,
         transport: DeviceTransport,
         watchdog: StallWatchdog,
-        progress: @Sendable (RestoreProgress) -> Void,
+        progress: @Sendable @escaping (RestoreProgress) -> Void,
         isCancelled: @Sendable () -> Bool
     ) async throws -> Result {
         progress(RestoreProgress(phase: .backup, fraction: 0.05, message: "Checking prerequisites…"))

@@ -15,12 +15,12 @@ import SQLite3
 
 protocol DeviceTransport: Sendable {
     /// Pull a FULL device backup into `stagingDir`. Progress 0...1.
-    func pullFullBackup(to stagingDir: URL, progress: @Sendable (Double) -> Void) async throws -> URL
+    func pullFullBackup(to stagingDir: URL, progress: @Sendable @escaping (Double) -> Void) async throws -> URL
     /// Push `backupRoot` back as a full restore. Progress 0...1.
     /// The device itself must confirm success — a transport return value
     /// alone is never reported as success (a restore once stopped at 55%
     /// and was misreported as done).
-    func pushFullRestore(from backupRoot: URL, progress: @Sendable (Double) -> Void) async throws
+    func pushFullRestore(from backupRoot: URL, progress: @Sendable @escaping (Double) -> Void) async throws
     /// Ask the device whether the restore landed. Must come from the
     /// device response, not from local bookkeeping.
     func verifyRestore(of backupRoot: URL) async throws -> Bool
@@ -42,7 +42,7 @@ protocol DeviceTransport: Sendable {
     /// requested and received. The device itself must confirm success —
     /// see verifyRestore.
     func pushPartialRestore(from backupRoot: URL, udid: String,
-                            progress: @Sendable (Double) -> Void) async throws -> Int
+                            progress: @Sendable @escaping (Double) -> Void) async throws -> Int
 }
 
 /// Real transport over the loopback tunnel. An actor: one transport =
@@ -100,7 +100,7 @@ actor LoopbackTransport: DeviceTransport {
     // MARK: - DeviceTransport
 
     func pullFullBackup(to stagingDir: URL,
-                        progress: @Sendable (Double) -> Void) async throws -> URL {
+                        progress: @Sendable @escaping (Double) -> Void) async throws -> URL {
         let (lockdown, identity, udid) = try await handshakedLockdown()
         defer { lockdown.close() }
 
@@ -147,7 +147,7 @@ actor LoopbackTransport: DeviceTransport {
     }
 
     func pushFullRestore(from backupRoot: URL,
-                         progress: @Sendable (Double) -> Void) async throws {
+                         progress: @Sendable @escaping (Double) -> Void) async throws {
         // Injection now happens in ModifyPhase (Apple layout
         // <aa>/<fileID> + Manifest.db rows), BEFORE this push — the
         // mandated BACKUP → PAYLOAD → MODIF → RESTORE order. This method
@@ -237,7 +237,7 @@ actor LoopbackTransport: DeviceTransport {
     }
 
     func pushPartialRestore(from backupRoot: URL, udid: String,
-                            progress: @Sendable (Double) -> Void) async throws -> Int {
+                            progress: @Sendable @escaping (Double) -> Void) async throws -> Int {
         let (lockdown, identity, handshakeUDID) = try await handshakedLockdown()
         defer { lockdown.close() }
         guard handshakeUDID == udid else {

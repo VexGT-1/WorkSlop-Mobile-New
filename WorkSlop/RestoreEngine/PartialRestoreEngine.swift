@@ -76,7 +76,7 @@ actor PartialRestoreEngine {
     ///   device's own refusal reason.
     func run(request: RestoreRequest,
              transport: DeviceTransport,
-             onProgress: @Sendable (Double) -> Void) async throws {
+             onProgress: @Sendable @escaping (Double) -> Void) async throws {
         guard !inFlight else { throw RestoreError.alreadyInFlight }
         let major = request.deviceVersion.major
         guard (16...26).contains(major) else {

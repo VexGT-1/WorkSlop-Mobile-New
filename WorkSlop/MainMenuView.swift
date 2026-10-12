@@ -39,7 +39,7 @@ struct MainMenuView: View {
                     }
                     .padding()
                 }
-                .onChange(of: pairingNote) { _, new in
+                .onChange(of: pairingNote) { new in
                     // Transient notes only: clear after 6s so a stale
                     // message never sits on screen.
                     guard let current = new else { return }

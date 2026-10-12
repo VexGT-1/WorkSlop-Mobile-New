@@ -1,6 +1,20 @@
 import SwiftUI
 import PhotosUI
 
+// MARK: - Aligned row icon
+
+/// Fixed-width SF Symbol for menu rows. Different symbols have
+/// different optical widths, which makes the label text start at
+/// ragged x positions ("mencong"). A fixed frame keeps every row's
+/// text in one straight column.
+struct RowIcon: View {
+    let name: String
+    var body: some View {
+        Image(systemName: name)
+            .frame(width: 30, alignment: .center)
+    }
+}
+
 // MARK: - Lock banner
 
 /// Shown at the top while the pairing-file + VPN gate is closed.

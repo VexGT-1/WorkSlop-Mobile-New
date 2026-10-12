@@ -18,7 +18,9 @@ struct ApplyView: View {
     @State private var backupPassword = ""
     @State private var running = false
     @State private var progress: RestoreProgress?
+    @State private var logLines: [String] = []
     @State private var result: ApplyResult?
+    @State private var showRestartSheet = false
 
     private enum ApplyResult {
         case succeeded
@@ -59,14 +61,42 @@ struct ApplyView: View {
             if running, let progress {
                 Section("Running") {
                     VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            Text("\(Int(progress.fraction * 100))%")
+                                .font(.title2.weight(.bold))
+                                .monospacedDigit()
+                            Spacer()
+                            Text(progress.phase.displayName)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        ProgressView(value: progress.fraction)
                         Text(progress.message)
                             .font(.subheadline)
-                        ProgressView(value: progress.fraction)
-                        Text("Phase: \(progress.phase.displayName)")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
                     }
                     .padding(.vertical, 4)
+                }
+
+                Section("Log") {
+                    ScrollViewReader { proxy in
+                        ScrollView {
+                            LazyVStack(alignment: .leading, spacing: 2) {
+                                ForEach(logLines.indices, id: \.self) { i in
+                                    Text(logLines[i])
+                                        .font(.caption.monospaced())
+                                        .foregroundStyle(.secondary)
+                                        .id(i)
+                                }
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .frame(height: 220)
+                        .onChange(of: logLines.count) { _ in
+                            if let last = logLines.indices.last {
+                                proxy.scrollTo(last, anchor: .bottom)
+                            }
+                        }
+                    }
                 }
             }
 
@@ -97,6 +127,39 @@ struct ApplyView: View {
                 .frame(maxWidth: .infinity)
                 .disabled(!canStart || running)
                 .accessibilityIdentifier("apply-now")
+            }
+            .sheet(isPresented: $showRestartSheet) {
+                NavigationStack {
+                    List {
+                        Section {
+                            Label("Apply complete", systemImage: "checkmark.circle.fill")
+                                .foregroundStyle(Color.green)
+                                .font(.headline)
+                            Text("The device confirmed every phase. Now restart your iPhone so SpringBoard picks up the new files.")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                        }
+                        Section("How to restart") {
+                            Label("Open Settings → General → Shut Down", systemImage: "1.circle")
+                            Label("Slide to power off, wait 10 seconds", systemImage: "2.circle")
+                            Label("Hold the side button until the Apple logo appears", systemImage: "3.circle")
+                            Label("After reboot, check that your tweaks are active", systemImage: "4.circle")
+                        }
+                        Section {
+                            Text("If a tweak didn't take effect, re-run Apply — the engine re-sends only what's needed.")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .navigationTitle("Restart your iPhone")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button("Done") { showRestartSheet = false }
+                        }
+                    }
+                }
+            }
 
                 if running {
                     Button("Cancel (between phases only)", role: .destructive) {
@@ -150,6 +213,7 @@ struct ApplyView: View {
         running = true
         result = nil
         progress = nil
+        logLines = ["[WorkSlop] Apply started — iOS \(DeviceInfoEx.fullVersion) (\(DeviceInfoEx.buildNumber))"]
         let request = RestoreRequest(
             deviceVersion: version,
             stagedFeatureIDs: selection.staged,
@@ -167,11 +231,17 @@ struct ApplyView: View {
                 // write on the main thread.
                 try await RestoreEngine.shared.start(
                     request: request,
-                    onProgress: { @MainActor p in self.progress = p }
+                    onProgress: { @MainActor p in
+                        self.progress = p
+                        let pct = Int(p.fraction * 100)
+                        self.logLines.append("[\(pct)%] [\(p.phase.displayName)] \(p.message)")
+                    }
                 )
                 await MainActor.run {
                     self.running = false
+                    self.logLines.append("[100%] Done — all phases confirmed by the device.")
                     self.result = .succeeded
+                    self.showRestartSheet = true
                 }
             } catch {
                 let message = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription

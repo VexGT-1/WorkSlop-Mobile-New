@@ -19,6 +19,7 @@ struct MainMenuView: View {
     @State private var importing = false
     @State private var pairingNote: String?
     @State private var showTunnelInfo = false
+    @State private var showAbout = false
 
     init(demoScreen: String? = nil) {
         self.demoScreen = demoScreen
@@ -67,6 +68,7 @@ struct MainMenuView: View {
             }
         }
         .sheet(isPresented: $showTunnelInfo) { TunnelInfoView() }
+        .sheet(isPresented: $showAbout) { AboutInfoView() }
     }
 
     // MARK: - Hero
@@ -79,8 +81,18 @@ struct MainMenuView: View {
                 .frame(width: 104, height: 104)
                 .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
                 .shadow(color: .black.opacity(0.18), radius: 10, y: 4)
-            Text("WorkSlop")
-                .font(.title.weight(.bold))
+            HStack(spacing: 6) {
+                Text("WorkSlop")
+                    .font(.title.weight(.bold))
+                Button {
+                    showAbout = true
+                } label: {
+                    Image(systemName: "info.circle")
+                        .font(.title3)
+                        .foregroundStyle(.secondary)
+                }
+                .accessibilityIdentifier("about-info")
+            }
             Text("\(DeviceStatus.modelOrDash) • \(DeviceInfoEx.versionWithBuild)")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
@@ -93,7 +105,11 @@ struct MainMenuView: View {
     private var deviceCard: some View {
         VStack(spacing: 0) {
             HStack {
-                Label("Pairing file", systemImage: "key.fill")
+                Label {
+                    Text("Pairing file")
+                } icon: {
+                    RowIcon(name: "key.fill")
+                }
                 Spacer()
                 Text(status.pairingImported ? "Imported" : "Not imported")
                     .foregroundStyle(status.pairingImported ? Color.green : .secondary)
@@ -133,7 +149,11 @@ struct MainMenuView: View {
             Divider()
 
             HStack {
-                Label("VPN tunnel", systemImage: "network")
+                Label {
+                    Text("VPN tunnel")
+                } icon: {
+                    RowIcon(name: "network")
+                }
                 Spacer()
                 Text(status.vpnDetected ? "DETECTED" : "-")
                     .foregroundStyle(status.vpnDetected ? Color.green : .secondary)
@@ -191,16 +211,25 @@ struct MainMenuView: View {
     private var menusCard: some View {
         VStack(spacing: 0) {
             NavigationLink(value: HomeRoute.allTweaks) {
-                Label("All Tweaks", systemImage: "info.circle")
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.vertical, 12)
+                Label {
+                    Text("All Tweaks")
+                } icon: {
+                    RowIcon(name: "info.circle")
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.vertical, 12)
             }
             .accessibilityIdentifier("menu-all-tweaks")
             Divider()
+                .padding(.leading, 38)
             NavigationLink(value: HomeRoute.settings) {
-                Label("Settings", systemImage: "gear")
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.vertical, 12)
+                Label {
+                    Text("Settings")
+                } icon: {
+                    RowIcon(name: "gear")
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.vertical, 12)
             }
             .accessibilityIdentifier("menu-settings")
         }
@@ -234,6 +263,54 @@ struct MainMenuView: View {
             return "Pairing file saved."
         } catch {
             return "Could not save the pairing file: \(error.localizedDescription)"
+        }
+    }
+}
+
+// MARK: - About / risks / how-to
+
+/// What the (i) button next to the WorkSlop title opens: the honest
+/// risks, the steps to use the app, and how the iOS 26 and iOS 27
+/// methods differ. English only - translations live in
+/// Localizable.xcstrings and are handled separately.
+struct AboutInfoView: View {
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    Text("Applying tweaks on iOS 27 is experimental and risky. iOS 27 can put your iPhone into a BOOTLOOP (stuck on the Apple logo, will not start).")
+                    Text("A full backup of ALL your data is taken before anything is written, but a backup cannot undo every kind of damage. The owner of this software (adnan.120hz) is NOT responsible for any damage, bootloop, or data loss.")
+                    Text("Your device backup must NOT be encrypted, otherwise the apply is refused before anything is written.")
+                    Text("Find My must be OFF before an apply and back ON afterwards. A running restore cannot be cancelled mid-flight - never force-quit the app while it runs.")
+                } header: {
+                    Text("Risks")
+                }
+
+                Section {
+                    Text("1. Import your pairing file (.plist) on this screen. On iOS 26 it comes from a computer (iDevice Pair / Apple Configurator); without it nothing can be delivered.")
+                    Text("2. Start a loopback VPN tunnel (WireGuard or StikDebug with a loopback configuration) until the VPN tunnel row above says DETECTED. This is not an internet VPN - no traffic leaves your iPhone.")
+                    Text("3. Open All Tweaks, pick a category, and stage the tweaks you want with the toggles.")
+                    Text("4. Back on Home, tap Apply. Confirm Find My is OFF, then follow the progress. When it finishes, restart your iPhone manually and check the tweaks.")
+                } header: {
+                    Text("How to use")
+                }
+
+                Section {
+                    Text("iOS 16 - 26: partial (sparse) restore. Only the staged files are delivered - no full backup, no wipe, no reboot by the app.")
+                    Text("iOS 27: full backup → payload → modify → restore, with all your data (the WorkSlop Desktop method). The phone is rebooted as part of the method; if it does not come back, force-restart it (Volume Up, Volume Down, hold the Side button).")
+                } header: {
+                    Text("iOS 26 vs iOS 27")
+                }
+            }
+            .navigationTitle("About WorkSlop")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
         }
     }
 }

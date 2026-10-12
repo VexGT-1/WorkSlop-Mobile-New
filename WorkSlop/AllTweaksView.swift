@@ -19,21 +19,29 @@ struct AllTweaksView: View {
     ]
 
     var body: some View {
-        List {
-            ForEach(groups) { group in
-                NavigationLink {
-                    TweakListView(group: group)
-                } label: {
-                    HStack {
-                        Label(group.id, systemImage: group.icon)
-                        Spacer()
-                        Text("\(group.count)")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
+        ZStack {
+            SkyBackground()
+            List {
+                ForEach(groups) { group in
+                    NavigationLink {
+                        TweakListView(group: group)
+                    } label: {
+                        HStack {
+                            Label {
+                                Text(group.id)
+                            } icon: {
+                                RowIcon(name: group.icon)
+                            }
+                            Spacer()
+                            Text("\(group.count)")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                        }
                     }
+                    .accessibilityIdentifier("tweak-group-\(group.id)")
                 }
-                .accessibilityIdentifier("tweak-group-\(group.id)")
             }
+            .scrollContentBackground(.hidden)
         }
         .navigationTitle("All Tweaks")
         .navigationBarTitleDisplayMode(.inline)
@@ -67,34 +75,46 @@ struct TweakListView: View {
     @StateObject private var iconStage = IconStage()
 
     var body: some View {
-        List {
-            if group.id == "Custom Icons" {
-                customIcons
-            } else {
-                Section {
-                    ForEach(FeatureCatalog.features(in: group.catalogSection)) { feature in
-                        FeatureToggleRow(feature: feature)
-                    }
-                    if group.id == "Status Bar" {
-                        NavigationLink {
-                            StatusBarDetailView()
-                        } label: {
-                            Label("Status Bar details", systemImage: "antenna.radiowaves.left.and.right")
+        ZStack {
+            SkyBackground()
+            List {
+                if group.id == "Custom Icons" {
+                    customIcons
+                } else {
+                    Section {
+                        ForEach(FeatureCatalog.features(in: group.catalogSection)) { feature in
+                            FeatureToggleRow(feature: feature)
                         }
-                        .accessibilityIdentifier("nav-statusbar-details")
-                    }
-                    if group.id == "PosterBoard" {
-                        NavigationLink {
-                            PosterBoardFilesView()
-                        } label: {
-                            Label("PosterBoard files", systemImage: "rectangle.on.rectangle")
+                        if group.id == "Status Bar" {
+                            NavigationLink {
+                                StatusBarDetailView()
+                            } label: {
+                                Label {
+                                    Text("Status Bar details")
+                                } icon: {
+                                    RowIcon(name: "antenna.radiowaves.left.and.right")
+                                }
+                            }
+                            .accessibilityIdentifier("nav-statusbar-details")
                         }
-                        .accessibilityIdentifier("nav-posterboard-files")
+                        if group.id == "PosterBoard" {
+                            NavigationLink {
+                                PosterBoardFilesView()
+                            } label: {
+                                Label {
+                                    Text("PosterBoard files")
+                                } icon: {
+                                    RowIcon(name: "rectangle.on.rectangle")
+                                }
+                            }
+                            .accessibilityIdentifier("nav-posterboard-files")
+                        }
+                    } footer: {
+                        if let footer = group.footer { Text(footer) }
                     }
-                } footer: {
-                    if let footer = group.footer { Text(footer) }
                 }
             }
+            .scrollContentBackground(.hidden)
         }
         .navigationTitle(group.id)
         .navigationBarTitleDisplayMode(.inline)

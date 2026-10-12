@@ -186,11 +186,23 @@ enum DeviceStatus {
 
     /// Phase 1 of the two-phase tunnel check (ala GoldenNugget's
     /// Tunnel.isInterfaceUp): true while a utun* interface carries a
-    /// real tunnel address. Deliberately NO IFF_UP|IFF_RUNNING gate —
-    /// that flag check was the "VPN tunnel ga kedeteksi" bug: a tunnel
+    /// tunnel address. Deliberately NO IFF_UP|IFF_RUNNING gate — that
+    /// flag check was the "VPN tunnel ga kedeteksi" bug: a tunnel
     /// can be up without both flags set, and the gate rejected it.
     /// Like GoldenNugget, this matches on the address actually
-    /// configured (never loopback, never link-local), not on flags.
+    /// configured, not on flags.
+    ///
+    /// Loopback (127.0.0.1/::1) on a utun interface COUNTS as a tunnel:
+    /// WorkSlop's whole method is a loopback tunnel back into the same
+    /// iPhone, and a WireGuard loopback configuration assigns 127.0.0.1
+    /// to its utun. lo0 is already excluded by the utun-prefix check, so
+    /// 127.0.0.1 here can only mean a deliberate loopback tunnel —
+    /// exactly what this app needs. (The old code skipped loopback with
+    /// "never a VPN tunnel" — domain-wrong for this app, and the reason
+    /// WireGuard loopback tunnels showed "-" while 10.x tunnels worked.)
+    /// Link-local (fe80::/10) is still skipped: idle system utun
+    /// interfaces carry only auto-assigned link-local, and accepting
+    /// those would false-positive on phones with no real tunnel.
     /// Phase 2 — does lockdownd actually answer on the tunnel? — is
     /// LockdownProbe.probe, run by "Refresh device status".
     static func vpnTunnelActive() -> Bool {
@@ -209,8 +221,13 @@ enum DeviceStatus {
             guard getnameinfo(sa, len, &host, socklen_t(host.count),
                               nil, 0, NI_NUMERICHOST) == 0 else { continue }
             let addr = String(cString: host)
-            // Loopback and link-local are never a VPN tunnel.
-            if addr == "127.0.0.1" || addr == "::1" { continue }
+            // Link-local (fe80::/10) is never a usable tunnel by itself:
+            // idle system utun interfaces carry only auto-assigned
+            // link-local, so accepting it would false-positive.
+            // Loopback (127.0.0.1/::1) IS accepted here — on a utun
+            // interface it means a deliberate loopback tunnel (WireGuard
+            // loopback configuration), which is exactly this app's method.
+            // lo0 can't reach this point (utun-prefix check above).
             if addr.hasPrefix("fe80") || addr.hasPrefix("FE80") { continue }
             return true
         }
@@ -278,6 +295,11 @@ enum FeatureCatalog {
     /// Desktop overall support line (is_version_supported): 16.0–<27.0.
     private static let ios16to26 = IOSWindow(min: (16, 0), maxExclusive: (27, 0))
     private static let ios26_0 = IOSWindow(min: (26, 0), maxExclusive: nil) // registry min only
+    /// Classic binary statusBarOverrides is dead on iOS 27 (desktop-verified:
+    /// "the classic binary statusBarOverrides file is dead" — only carrier
+    /// text survives via StatusBarOverrides.archive). Gate the classic
+    /// overrides to iOS 26.x so iOS 27 shows an honest "unsupported" chip.
+    private static let ios26xOnly = IOSWindow(min: (26, 0), maxExclusive: (27, 0))
 
     /// Draws tweak titles and the keys actually written from the desktop
     /// registry (sections Liquid Glass, SpringBoard, Internal Options)
@@ -292,7 +314,7 @@ enum FeatureCatalog {
         // --- Liquid Glass (regular set, partial restore) ---
         Feature(id: "lg-legibility-2", title: "Glass Legibility Value 2",
                 subtitle: "UIViewGlassLegibilitySetting = 2", section: "Liquid Glass",
-                route: .partialRestore, window: ios26),
+                route: .partialRestore, window: ios26xOnly),
         Feature(id: "lg-disallow-clock", title: "Disallow Glass on LS Clock",
                 subtitle: "SBDisallowGlassTime", section: "Liquid Glass",
                 route: .partialRestore, window: ios26),
@@ -301,43 +323,43 @@ enum FeatureCatalog {
                 route: .partialRestore, window: ios26),
         Feature(id: "lg-flat-icons", title: "Flat Icons Everywhere",
                 subtitle: "SBUseFlatIconsEverywhere", section: "Liquid Glass",
-                route: .partialRestore, window: ios26),
+                route: .partialRestore, window: ios26xOnly),
         Feature(id: "lg-disable-widget-specular", title: "Disable Widget Specular",
                 subtitle: "SBDisableWidgetSpecular", section: "Liquid Glass",
-                route: .partialRestore, window: ios26),
+                route: .partialRestore, window: ios26xOnly),
         Feature(id: "lg-disable-dock-specular", title: "Disable Dock Specular",
                 subtitle: "SBDisableDockSpecular", section: "Liquid Glass",
-                route: .partialRestore, window: ios26),
+                route: .partialRestore, window: ios26xOnly),
         Feature(id: "lg-disable-folder-specular", title: "Disable Folder Specular",
                 subtitle: "SBDisableFolderSpecular", section: "Liquid Glass",
-                route: .partialRestore, window: ios26),
+                route: .partialRestore, window: ios26xOnly),
         Feature(id: "lg-exclude-clear-shadows", title: "Exclude Clear Glass Shadows",
                 subtitle: "SBExcludeAllClearGlassShadows", section: "Liquid Glass",
-                route: .partialRestore, window: ios26),
+                route: .partialRestore, window: ios26xOnly),
         Feature(id: "lg-disable-refraction", title: "Disable Outer Refraction",
                 subtitle: "SolariumDisableOuterRefraction", section: "Liquid Glass",
-                route: .partialRestore, window: ios26),
+                route: .partialRestore, window: ios26xOnly),
         Feature(id: "lg-disable-hdr", title: "Disable Solarium HDR",
                 subtitle: "SolariumAllowHDR = false", section: "Liquid Glass",
-                route: .partialRestore, window: ios26),
+                route: .partialRestore, window: ios26xOnly),
         Feature(id: "lg-disable-specular-motion", title: "Disable Specular Motion",
                 subtitle: "SBDisableSpecularEverywhereUsingLSSAssertion", section: "Liquid Glass",
-                route: .partialRestore, window: ios26),
+                route: .partialRestore, window: ios26xOnly),
         Feature(id: "lg-disable-specular-everywhere", title: "Disable Specular Everywhere",
                 subtitle: "SBDisableSpecularEverywhere", section: "Liquid Glass",
-                route: .partialRestore, window: ios26),
+                route: .partialRestore, window: ios26xOnly),
         Feature(id: "lg-blurr-motion", title: "Blurr Motion",
                 subtitle: "SolariumIncreasedDiffusion", section: "Liquid Glass",
-                route: .partialRestore, window: ios26),
+                route: .partialRestore, window: ios26xOnly),
 
         // --- Status Bar (desktop Status Bar page) ---
         Feature(
             id: "status-bar",
             title: "Status Bar Overrides",
-            subtitle: "Carrier text, icons & overrides",
+            subtitle: "Carrier text, icons & overrides (iOS 26.x only — classic binary is dead on iOS 27)",
             section: "Status Bar",
             route: .partialRestore,
-            window: ios26_0),
+            window: ios26xOnly),
 
         // --- SpringBoard (desktop SpringBoard section) ---
         Feature(id: "sb-watchos-pairing", title: "Allow pairing with any watchOS version",

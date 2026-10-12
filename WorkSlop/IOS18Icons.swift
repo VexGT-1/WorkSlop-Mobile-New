@@ -77,6 +77,13 @@ enum IOS18IconCatalog {
         IOS18Icon(name: "Apple Sports", bundleID: "com.apple.sports", slug: "apple-sports"),
         IOS18Icon(name: "TV", bundleID: "com.apple.tv", slug: "tv"),
         IOS18Icon(name: "Shazam", bundleID: "com.shazam.Shazam", slug: "shazam"),
+        // Tinted-only entries (catwithabaloon 2.0 pack has 67 tinted PNGs;
+        // these 5 have desktop-verified Apple bundle IDs).
+        IOS18Icon(name: "Freeform", bundleID: "com.apple.Freeform", slug: "freeform"),
+        IOS18Icon(name: "Journal", bundleID: "com.apple.Journal", slug: "journal"),
+        IOS18Icon(name: "Feedback", bundleID: "com.apple.FeedbackAssistant", slug: "feedback"),
+        IOS18Icon(name: "Image Playground", bundleID: "com.apple.ImagePlayground", slug: "image-playground"),
+        IOS18Icon(name: "Final Cut Camera", bundleID: "com.apple.FinalCutCamera", slug: "final-cut-camera"),
     ]
 
     static func imageData(slug: String, dark: Bool) -> Data? {

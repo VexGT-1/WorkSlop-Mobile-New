@@ -4,9 +4,8 @@ import Foundation
 //
 // The desktop WorkSlop write targets for the mobile catalog IDs in
 // Feature.swift, extracted verbatim from the desktop tree (citations
-// per entry). PayloadBuilder builds real staging files from this data.
-// Sending them to the system still rides the restore engine, which is
-// not connected yet.
+// per entry). PayloadBuilder builds real staging files from this data;
+// the restore engine (RestoreEngine, version-routed) sends them.
 //
 // How to read the desktop citations:
 // - A registry entry written with `_t(...)` and no explicit `value=` uses
@@ -1293,68 +1292,6 @@ PayloadSpec(
                     filePath: "/var/db/com.apple.xpc.launchd/disabled.plist",
                     restorePath: "com.apple.xpc.launchd/disabled.plist",
                     key: "com.apple.sociald",
-                    value: .bool(true)
-                )
-            ]
-        ),
-
-        // Desktop: src/tweaks/registry.py:406-410;
-        // src/tweaks/lg_latest.py:48-64,120-186;
-        // src/tweaks/lg_disable.py:80-81.
-        PayloadSpec(
-            featureID: "lg-latest",
-            writes: [
-                PayloadWrite(
-                    domain: .homeDomain,
-                    location: .directRestorePath,
-                    filePath: "/var/mobile/Library/Preferences/com.apple.SwiftUI.plist",
-                    restorePath: "Library/Preferences/com.apple.SwiftUI.plist",
-                    key: "SolariumForceFallback",
-                    value: .bool(true),
-                    condition: "Merged into the device's existing plist when present; the file may be created when absent."
-                ),
-                PayloadWrite(
-                    domain: .homeDomain,
-                    location: .fileLocation(member: "FileLocation.globalPreferencesHomeDomain"),
-                    filePath: "/var/mobile/Library/Preferences/.GlobalPreferences.plist",
-                    restorePath: "Library/Preferences/.GlobalPreferences.plist",
-                    key: "SBDisallowGlassTime",
-                    value: .bool(true),
-                    condition: "Requires the device's live .GlobalPreferences.plist as the merge base; fail closed without it."
-                ),
-                PayloadWrite(
-                    domain: .homeDomain,
-                    location: .fileLocation(member: "FileLocation.globalPreferencesHomeDomain"),
-                    filePath: "/var/mobile/Library/Preferences/.GlobalPreferences.plist",
-                    restorePath: "Library/Preferences/.GlobalPreferences.plist",
-                    key: "SBDisallowGlassButtons",
-                    value: .bool(true),
-                    condition: "Requires the device's live .GlobalPreferences.plist as the merge base; fail closed without it."
-                ),
-                PayloadWrite(
-                    domain: .homeDomain,
-                    location: .directRestorePath,
-                    filePath: "/var/mobile/Library/Preferences/com.apple.springboard.plist",
-                    restorePath: "Library/Preferences/com.apple.springboard.plist",
-                    key: "SBDisableSpecularEverywhereUsingLSSAssertion",
-                    value: .bool(true),
-                    condition: "Merged into the device's existing plist when present; the payload must remain a non-empty, parseable plist and must never be zero bytes."
-                )
-            ],
-            note: "Three-file Liquid Glass (Latest) payload. The registry entry is only the staging marker; the real writes are the four keys above."
-        ),
-
-        // Desktop: src/tweaks/registry.py:251;
-        // src/tweaks/basic_plist_locations.py:20.
-        PayloadSpec(
-            featureID: "lg-force-fallback",
-            writes: [
-                PayloadWrite(
-                    domain: .managedPreferencesDomain,
-                    location: .fileLocation(member: "FileLocation.globalPreferences"),
-                    filePath: "/var/Managed Preferences/mobile/.GlobalPreferences.plist",
-                    restorePath: "mobile/.GlobalPreferences.plist",
-                    key: "SolariumForceFallback",
                     value: .bool(true)
                 )
             ]

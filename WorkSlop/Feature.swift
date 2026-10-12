@@ -1,8 +1,8 @@
 import Foundation
 
-/// Delivery route a tweak rides on iOS 26. Everything stages through the
-/// partial (sparse) restore EXCEPT the S8 "Liquid Glass (Latest)" tweak,
-/// which rides a full backup -> modify -> restore with all data, exactly
+/// Delivery route a tweak rides. Everything stages through the
+/// partial (sparse) restore on iOS 26; on iOS 27 everything rides
+/// a full backup -> modify -> restore with all data, exactly
 /// like the desktop. (The desktop's old Beta 1 tweaks were removed by
 /// the maintainer and do not exist here.)
 enum DeliveryRoute: String {
@@ -73,7 +73,7 @@ struct Feature: Identifiable {
 
     /// Full route sentence for the info sheet. Standing wording:
     /// Partial restore tops out at iOS 26; iOS 27 is the Full
-    /// backup route; the S8 set rides Full backup on 26.6.1 too.
+    /// backup route.
     var routeSummary: String {
         if route == .partialRestore && reachesIOS27 {
             return "Partial restore - max iOS 26. On iOS 27 this rides Full backup \u{2192} modify \u{2192} restore."
@@ -81,16 +81,11 @@ struct Feature: Identifiable {
         if route == .partialRestore {
             return "Partial restore - max iOS 26."
         }
-        return "Full backup \u{2192} modify \u{2192} restore - the WorkSlop Desktop method; this is the iOS 27 route. On iOS 26.6.1 the S8 set (Liquid Glass Latest) uses full backup of all data - the WorkSlop Desktop way too."
+        return "Full backup \u{2192} modify \u{2192} restore - the WorkSlop Desktop method; this is the iOS 27 route."
     }
     let window: IOSWindow
 
     func availability(for ios: (major: Int, minor: Int)) -> Availability {
-        // Desktop arms Liquid Glass Latest only on iOS 26.6.x builds
-        // 23G82/23G83 (device_manager.py) - same gate here.
-        if id == "lg-latest", !["23G82", "23G83"].contains(DeviceInfoEx.buildNumber) {
-            return .unsupported(reason: "Requires iOS 26.6.x (23G82/23G83)")
-        }
         return window.contains(ios)
             ? .supported
             : .unsupported(reason: "Requires \(window.label)")
@@ -294,26 +289,7 @@ enum FeatureCatalog {
     /// delivery channel is proven closed on retail iOS 26.6.1, so it is
     /// not offered here.
     static let all: [Feature] = [
-        // --- Liquid Glass (Terbaru) — the S8 payload, full-backup route.
-        // SolariumForceFallback is read live by DesignLibrary from
-        // com.apple.SwiftUI on iOS 26.6.1 (firmware-verified); the
-        // on-screen effect is still a device-test question.
-        Feature(
-            id: "lg-latest",
-            title: "Liquid Glass iOS 26.6.1 RC S8",
-            subtitle: "SolariumForceFallback → com.apple.SwiftUI.plist + 2 key lock-screen + specular. Desktop arms this only on iOS 26.6.x builds 23G82/23G83.",
-            section: "Liquid Glass",
-            route: .fullBackup,
-            window: ios26),
-
-        // Removed after the 2026-10-07 firmware audit (STRING ABSENT
-        // in iOS 26.6.1 firmware): lg-disable-swiftui, sb-airdrop-limit,
-        // in-clock-seconds, in-imessage-debug, in-appstore-debug,
-        // in-notes-debug. Keys with no home in firmware are not offered.
         // --- Liquid Glass (regular set, partial restore) ---
-        Feature(id: "lg-force-fallback", title: "Force Solarium Fallback",
-                subtitle: "SolariumForceFallback", section: "Liquid Glass",
-                route: .partialRestore, window: ios26),
         Feature(id: "lg-legibility-2", title: "Glass Legibility Value 2",
                 subtitle: "UIViewGlassLegibilitySetting = 2", section: "Liquid Glass",
                 route: .partialRestore, window: ios26),

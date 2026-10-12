@@ -9,11 +9,6 @@ on:
         description: 'Also make UI screenshots (artifact only, never in repo)'
         type: boolean
         default: false
-      proof_style:
-        description: 'UI style for the screenshots'
-        type: choice
-        options: [workslop, nugget, modern]
-        default: workslop
 
 jobs:
   build:
@@ -76,15 +71,15 @@ jobs:
           xcrun simctl bootstatus "$SIM_ID" -b || true
           APP="${{ runner.temp }}/SimDD/Build/Products/Debug-iphonesimulator/WorkSlop.app"
           xcrun simctl install "$SIM_ID" "$APP"
-          # One screenshot per menu: home, settings table, status-bar
-          # details, posterboard files. Screenshots only — no recording.
-          for spec in "home:" "settings:settings" "statusbar:statusbar" "posterboard:posterboard"; do
+          # One screenshot per menu: home, all tweaks, settings,
+          # apply. Screenshots only — no recording.
+          for spec in "home:" "alltweaks:alltweaks" "settings:settings" "apply:apply"; do
             name="${spec%%:*}"
             screen="${spec#*:}"
             if [ -n "$screen" ]; then
-              xcrun simctl launch --terminate-running-process "$SIM_ID" com.adnan120hz.workslop -DemoIOS26 -DemoScreen "$screen" -uiStyle ${{ inputs.proof_style }} || true
+              xcrun simctl launch --terminate-running-process "$SIM_ID" com.adnan120hz.workslop -DemoIOS26 -DemoScreen "$screen" || true
             else
-              xcrun simctl launch --terminate-running-process "$SIM_ID" com.adnan120hz.workslop -DemoIOS26 -uiStyle ${{ inputs.proof_style }} || true
+              xcrun simctl launch --terminate-running-process "$SIM_ID" com.adnan120hz.workslop -DemoIOS26 || true
             fi
             sleep 4
             xcrun simctl io "$SIM_ID" screenshot "${{ runner.temp }}/proof-${name}.png"

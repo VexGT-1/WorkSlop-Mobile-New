@@ -298,7 +298,7 @@ final actor MobileBackup2Client {
                 fileCount += try await receiveFiles(to: backupRoot, progress: progress)
             case "DLMessageDownloadFiles":
                 // Not expected during a pull, but handle honestly if asked.
-                try await sendFiles(from: backupRoot, list: items, progress: progress)
+                _ = try await sendFiles(from: backupRoot, list: items, progress: progress)
             case "DLMessageGetFreeDiskSpace":
                 let free = (try? FileManager.default.attributesOfFileSystem(forPath: backupRoot.path)[.systemFreeSize] as? NSNumber)?.uint64Value ?? 0
                 try await sendStatusResponse(status: 0, status1: nil, status2: NSNumber(value: free))
@@ -439,8 +439,10 @@ final actor MobileBackup2Client {
                     from backupRoot: URL, fileResolver: @Sendable (String) -> URL?,
                     progress: @Sendable (Double, String) -> Void) async throws -> Bool {
         // Restore options — idevicebackup2.c (CMD_RESTORE).
+        // No RestoreShouldReboot: the engine reboots explicitly exactly
+        // once after the restore (desktop: reboot=False). Letting the
+        // device auto-reboot AND rebooting again was a double reboot.
         var options: [String: Any] = [
-            "RestoreShouldReboot": true,
             "RestoreDontCopyBackup": true,
             "RestorePreserveSettings": true,
             "RemoveItemsNotRestored": false,
@@ -459,12 +461,16 @@ final actor MobileBackup2Client {
                 if items.count > 2, let p = items[2] as? NSNumber {
                     progress(p.doubleValue, "Sending files…")
                 }
-                try await sendFiles(from: backupRoot, list: items, progress: progress, resolver: fileResolver)
+                _ = try await sendFiles(from: backupRoot, list: items, progress: progress, resolver: fileResolver)
             case "DLMessageUploadFiles":
                 // Not expected during a push; drain honestly rather than hanging.
                 _ = try await receiveFiles(to: FileManager.default.temporaryDirectory, progress: progress)
             case "DLMessageGetFreeDiskSpace":
-                try await sendStatusResponse(status: 0, status1: nil, status2: NSNumber(value: UInt64(0)))
+                // Answer the REAL free byte count (like the backup path
+                // does). Answering 0 made the device refuse the restore
+                // for "insufficient space".
+                let free = (try? FileManager.default.attributesOfFileSystem(forPath: backupRoot.path)[.systemFreeSize] as? NSNumber)?.uint64Value ?? 0
+                try await sendStatusResponse(status: 0, status1: nil, status2: NSNumber(value: free))
             case "DLMessagePurgeDiskSpace":
                 try await sendStatusResponse(status: -1, status1: "Operation not supported", status2: [String: Any]())
             case "DLMessageCreateDirectory":
@@ -493,18 +499,121 @@ final actor MobileBackup2Client {
         return deviceConfirmed
     }
 
+    // MARK: - partial restore push (host → device, iOS 16–26 sparse method)
+
+    /// Sends "Restore" for a SYNTHESIZED sparse backup (legacy
+    /// Manifest.mbdb, payloads flat by fileID). Options mirror
+    /// GoldenNugget-mobile's partial path (Rust RestoreOptions with
+    /// reboot=false, system_files=true): no wipe, no reboot — the device
+    /// writes the listed system files in place.
+    ///
+    /// Returns (deviceConfirmed, servedFiles). deviceConfirmed is the
+    /// device's own DLMessageProcessMessage ErrorCode==0; servedFiles
+    /// counts files the device actually pulled, so a confirmed-but-empty
+    /// restore can't be mistaken for a delivered one.
+    func runPartialRestore(targetID: String, sourceID: String, password: String?,
+                           from backupRoot: URL,
+                           progress: @Sendable (Double, String) -> Void) async throws
+        -> (deviceConfirmed: Bool, servedFiles: Int)
+    {
+        var options: [String: Any] = [
+            "RestoreShouldReboot": false,
+            "RestoreDontCopyBackup": false,
+            "RestorePreserveSettings": true,
+            "RestoreSystemFiles": true,
+            "RemoveItemsNotRestored": false,
+        ]
+        if let password = password { options["Password"] = password }
+        try await sendRequest("Restore", targetID: targetID, sourceID: sourceID, options: options)
+
+        var deviceConfirmed = false
+        var servedFiles = 0
+        var done = false
+        while !done {
+            if isCancelled() { throw MobileBackup2Error.cancelled }
+            let (name, items) = try await receiveDL()
+            switch name {
+            case "DLMessageDownloadFiles":
+                // Overall progress at index 2 of the items (index 3 of the
+                // full array — mb2_set_overall_progress_from_message).
+                if items.count > 2, let p = items[2] as? NSNumber {
+                    progress(p.doubleValue, "Sending files…")
+                }
+                servedFiles += try await sendFiles(from: backupRoot, list: items, progress: progress)
+            case "DLMessageUploadFiles":
+                // Not expected during a push; drain honestly rather than hanging.
+                _ = try await receiveFiles(to: FileManager.default.temporaryDirectory, progress: progress)
+            case "DLContentsOfDirectory":
+                try await handleListDirectory(items, base: backupRoot)
+            case "DLMessageGetFreeDiskSpace":
+                let free = (try? FileManager.default.attributesOfFileSystem(forPath: backupRoot.path)[.systemFreeSize] as? NSNumber)?.uint64Value ?? 0
+                try await sendStatusResponse(status: 0, status1: nil, status2: NSNumber(value: free))
+            case "DLMessagePurgeDiskSpace":
+                try await sendStatusResponse(status: -1, status1: "Operation not supported", status2: [String: Any]())
+            case "DLMessageCreateDirectory":
+                try await handleCreateDirectory(items, base: backupRoot)
+            case "DLMessageMoveFiles", "DLMessageMoveItems":
+                try await handleMove(items, base: backupRoot)
+            case "DLMessageRemoveFiles", "DLMessageRemoveItems":
+                try await handleRemove(items, base: backupRoot)
+            case "DLMessageDisconnect":
+                done = true
+            case "DLMessageProcessMessage":
+                if let dict = items.first as? [String: Any],
+                   let code = dict["ErrorCode"] as? NSNumber {
+                    // The device's own verdict.
+                    deviceConfirmed = (code.uint64Value == 0)
+                    if !deviceConfirmed {
+                        throw MobileBackup2Error.deviceError(
+                            "partial restore ErrorCode=\(code) (\(dict["ErrorDescription"] as? String ?? "?"))")
+                    }
+                }
+            default:
+                throw MobileBackup2Error.unexpectedMessage(name)
+            }
+        }
+        return (deviceConfirmed, servedFiles)
+    }
+
+    /// Answers DLContentsOfDirectory (idevicebackup2.c
+    /// mb2_handle_list_directory): status 0 +
+    /// { name: { DLFileType, DLFileSize, DLFileModificationDate } }.
+    private func handleListDirectory(_ items: [Any], base: URL) async throws {
+        var listing: [String: Any] = [:]
+        if items.count > 1, let rel = items[1] as? String {
+            let dirURL = base.appendingPathComponent(rel)
+            if let names = try? FileManager.default.contentsOfDirectory(atPath: dirURL.path) {
+                for name in names {
+                    let url = dirURL.appendingPathComponent(name)
+                    var isDir: ObjCBool = false
+                    _ = FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir)
+                    let attrs = try? FileManager.default.attributesOfItem(atPath: url.path)
+                    listing[name] = [
+                        "DLFileType": isDir.boolValue ? "DLFileTypeDirectory" : "DLFileTypeRegular",
+                        "DLFileSize": attrs?[.size] as? NSNumber ?? NSNumber(value: 0),
+                        "DLFileModificationDate": attrs?[.modificationDate] as? Date ?? Date(),
+                    ]
+                }
+            }
+        }
+        try await sendStatusResponse(status: 0, status1: nil, status2: listing)
+    }
+
     /// Serves one DLMessageDownloadFiles: for each requested path, send
     /// path length + path, then the file in CODE_FILE_DATA chunks +
     /// CODE_SUCCESS terminator (mb2_handle_send_file). Ends with a zero
     /// dword + DLMessageStatusResponse (mb2_handle_send_files).
+    ///
+    /// Returns the number of files actually sent.
     private func sendFiles(from backupRoot: URL, list items: [Any],
                            progress: @Sendable (Double, String) -> Void,
-                           resolver: @Sendable (String) -> URL? = { _ in nil }) async throws {
+                           resolver: @Sendable (String) -> URL? = { _ in nil }) async throws -> Int {
         guard let files = items.first as? [String] else {
             throw MobileBackup2Error.plistError("DLMessageDownloadFiles: item[0] is not a string array")
         }
         var errcode = 0
         var errdesc: String? = nil
+        var served = 0
         for path in files {
             if isCancelled() { throw MobileBackup2Error.cancelled }
             let localURL: URL? = {
@@ -518,6 +627,7 @@ final actor MobileBackup2Client {
             }
             do {
                 try await sendOneFile(path: path, url: url, progress: progress)
+                served += 1
             } catch {
                 errcode = -1; errdesc = "send \(path): \(error.localizedDescription)"
                 break
@@ -533,6 +643,7 @@ final actor MobileBackup2Client {
                                          status2: ["error": errdesc ?? "unknown"])
         }
         if errcode != 0 { throw MobileBackup2Error.fileError(errdesc ?? "send failed") }
+        return served
     }
 
     private func sendOneFile(path: String, url: URL,

@@ -16,20 +16,27 @@ enum RestorePhase {
         request: RestoreRequest,
         backupRoot: URL,
         transport: DeviceTransport,
+        watchdog: StallWatchdog,
         progress: @Sendable (RestoreProgress) -> Void,
         isCancelled: @Sendable () -> Bool
     ) async throws {
         progress(RestoreProgress(phase: .restore, fraction: 0.05, message: "Pushing full restore…"))
+        // Last cancel point before the device is written. Once the push
+        // starts, user cancel no longer interrupts it (desktop: never cut
+        // an in-flight restore) — the transport only honors task-level
+        // cancellation (the inner I/O watchdog), never the user flag.
         if isCancelled() { throw RestoreError.cancelled }
 
-        // Throws .unimplemented until the transport exists — loudly,
-        // with the missing piece named. Never reported as success.
         try await transport.pushFullRestore(from: backupRoot) { f in
-            progress(RestoreProgress(phase: .restore, fraction: 0.05 + 0.85 * f,
-                                     message: "Restoring… \(Int(f * 100))%"))
+            // Gap 12 fix: every device tick proves liveness (desktop's
+            // restore progress callback). Sync closure → Task hop.
+            Task { await watchdog.noteProgress() }
+            if f >= 0 {
+                progress(RestoreProgress(phase: .restore, fraction: 0.05 + 0.85 * f,
+                                         message: "Restoring… \(Int(f * 100))%"))
+            }
         }
 
-        // Unreachable today. Contract for the future transport:
         progress(RestoreProgress(phase: .restore, fraction: 0.95, message: "Verifying restore on device…"))
         let confirmed = try await transport.verifyRestore(of: backupRoot)
         guard confirmed else {

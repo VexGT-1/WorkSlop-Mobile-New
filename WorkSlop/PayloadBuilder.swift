@@ -23,13 +23,11 @@ struct BuiltPayload {
 /// - Features whose payload needs user-supplied material (Status Bar
 ///   struct fields, Custom Icons theme choice) are NOT guessed: they
 ///   are reported as warnings and left out of the bundle.
-/// - `lg-latest` merges into the device's live plists on desktop. That
-///   merge base only exists during a real restore session, so the
-///   preview bundle is built from an empty base and says so. Fail
+/// - Payloads are built from an empty base and say so. Fail
 ///   closed, never invent a base.
 ///
 /// Building files locally is real; sending them to the system is the
-/// restore engine's job, which is not connected yet.
+/// restore engine's job (RestoreEngine routes by iOS version).
 enum PayloadBuilder {
     static func build(staged: Set<String>) -> BuiltPayload {
         build(staged: staged, iconEntries: CustomIconStore.load())

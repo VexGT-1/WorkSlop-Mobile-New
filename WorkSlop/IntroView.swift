@@ -22,10 +22,9 @@ struct IntroView: View {
                 introPage(
                     title: "Supported iOS",
                     lines: [
-                        "Liquid Glass (regular set): iOS 26.0 and later.",
-                        "Liquid Glass iOS 26.6.1 RC S8: iOS 26.6.x builds 23G82/23G83 only.",
+                        "Liquid Glass: iOS 26.0 and later.",
                         "Status Bar classic options: iOS 26.x (iOS 27 keeps carrier text only).",
-                        "Most tweaks ride Partial restore (max iOS 26); the S8 set uses full backup (all data) on iOS 26.6.1. On iOS 27, features whose support reaches 27 ride Full backup \u{2192} modify \u{2192} restore.",
+                        "iOS 26 and below: tweaks ride Partial restore (sparse restore, no wipe). iOS 27: Full backup \u{2192} modify \u{2192} restore with all data - the WorkSlop Desktop method.",
                         "Devices below iOS 16.0 or above iOS 27 get an \"iOS version not supported\" notice instead of this app.",
                     ])
                 .tag(1)
@@ -33,11 +32,11 @@ struct IntroView: View {
                 introPage(
                     title: "Before you apply",
                     lines: [
-                        "Import the pairing file (.plist) in the Status section.",
-                        "Applies are designed to run over a loopback VPN tunnel to this same phone.",
+                        "Import the pairing file (.plist) on the Home screen.",
+                        "Applies run over a loopback VPN tunnel to this same phone - the tunnel row on Home must say DETECTED.",
+                        "Find My must be OFF before an apply, back ON afterwards - same rule as the desktop.",
                         "The app cannot reboot your iPhone \u{2014} after an apply you restart manually.",
-                        "Cancel only unstages: nothing is in flight yet.",
-                        "Apply builds the real payload on this phone. Sending it to the system waits on the on-device restore engine, which is not built yet.",
+                        "Apply sends the staged tweaks through the on-device restore engine. A running restore cannot be cancelled mid-flight.",
                     ])
                 .tag(2)
             }

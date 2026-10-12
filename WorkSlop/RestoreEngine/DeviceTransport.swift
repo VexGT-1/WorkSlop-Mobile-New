@@ -26,6 +26,23 @@ protocol DeviceTransport: Sendable {
     func verifyRestore(of backupRoot: URL) async throws -> Bool
     /// Reboot the device over lockdown.
     func rebootDevice() async throws
+    /// Block until the device answers lockdown again (post-reboot),
+    /// polling with a FRESH session each time — the pre-reboot session
+    /// is dead by definition (desktop: wait_for_ios27_device_online).
+    /// Returns true as soon as the device is back, false on timeout.
+    /// A false is honest, not a brick verdict: the device may still be
+    /// booting or stuck on the Apple logo.
+    func waitForDeviceOnline(timeoutSeconds: TimeInterval) async -> Bool
+    /// The device's UDID from a live lockdown query — never guessed.
+    /// Needed to name a synthesized backup's device directory.
+    func deviceUDID() async throws -> String
+    /// Push a SYNTHESIZED sparse backup (legacy Manifest.mbdb, payloads
+    /// flat by fileID) as a partial restore — iOS 16–26. No wipe, no
+    /// reboot. Returns the number of files the device actually
+    /// requested and received. The device itself must confirm success —
+    /// see verifyRestore.
+    func pushPartialRestore(from backupRoot: URL, udid: String,
+                            progress: @Sendable (Double) -> Void) async throws -> Int
 }
 
 /// Real transport over the loopback tunnel. An actor: one transport =
@@ -98,13 +115,24 @@ actor LoopbackTransport: DeviceTransport {
         }
 
         let mb2 = MobileBackup2Client(port: port)
+        // Task-level cancellation only (the inner I/O watchdog's path).
+        // The user cancel flag is deliberately NOT wired in: cancel is
+        // honored between phases, never mid-transfer (desktop: never cut
+        // an in-flight backup/restore).
         await mb2.setCancelled { Task.isCancelled }
         do {
             _ = try await mb2.connect()
-            let count = try await mb2.runBackup(
-                targetID: udid, sourceID: udid, password: backupPassword,
-                to: stagingDir,
-                progress: { f, _ in if f >= 0 { progress(f) } })
+            // Inner I/O watchdog (desktop: run_with_stall_watchdog, 300s):
+            // a wedged device aborts here instead of hanging forever.
+            let count = try await withIOWatchdog(
+                phase: .backup, operation: "backup",
+                onStall: { await mb2.disconnect() }
+            ) { tick in
+                try await mb2.runBackup(
+                    targetID: udid, sourceID: udid, password: backupPassword,
+                    to: stagingDir,
+                    progress: { f, _ in tick(); if f >= 0 { progress(f) } })
+            }
             // A pulled backup that yielded zero files is not a backup.
             guard count > 0 else {
                 throw RestoreError.phaseFailed(
@@ -120,11 +148,10 @@ actor LoopbackTransport: DeviceTransport {
 
     func pushFullRestore(from backupRoot: URL,
                          progress: @Sendable (Double) -> Void) async throws {
-        // 1. Register the injected payload files in the pulled Manifest.db
-        //    so the device actually requests them (fileID → domain/path).
-        let patch = try ManifestDBPatcher.patch(backupRoot: backupRoot)
-
-        // 2. Push over the wire.
+        // Injection now happens in ModifyPhase (Apple layout
+        // <aa>/<fileID> + Manifest.db rows), BEFORE this push — the
+        // mandated BACKUP → PAYLOAD → MODIF → RESTORE order. This method
+        // only pushes; it never mutates the backup.
         let (lockdown, identity, udid) = try await handshakedLockdown()
         defer { lockdown.close() }
 
@@ -136,20 +163,36 @@ actor LoopbackTransport: DeviceTransport {
         }
 
         let mb2 = MobileBackup2Client(port: port)
+        // See pullFullBackup: task-level cancellation only; user cancel
+        // never interrupts an in-flight restore.
         await mb2.setCancelled { Task.isCancelled }
         do {
             _ = try await mb2.connect()
 
-            let fileIDMap = patch.fileIDMap
-            let confirmed = try await mb2.runRestore(
-                targetID: udid, sourceID: udid, password: backupPassword,
-                from: backupRoot,
-                fileResolver: { [backupRoot] path in
-                    let direct = backupRoot.appendingPathComponent(path)
-                    if FileManager.default.fileExists(atPath: direct.path) { return direct }
-                    return fileIDMap[path]
-                },
-                progress: { f, _ in if f >= 0 { progress(f) } })
+            let confirmed = try await withIOWatchdog(
+                phase: .restore, operation: "restore",
+                onStall: { await mb2.disconnect() }
+            ) { tick in
+                try await mb2.runRestore(
+                    targetID: udid, sourceID: udid, password: backupPassword,
+                    from: backupRoot,
+                    fileResolver: { [backupRoot] path in
+                        let direct = backupRoot.appendingPathComponent(path)
+                        if FileManager.default.fileExists(atPath: direct.path) { return direct }
+                        // Injected payloads live at <aa>/<fileID> (Apple
+                        // layout, written by ModifyPhase); the device may
+                        // request the bare fileID.
+                        if path.count == 40,
+                           path.allSatisfy({ $0.isHexDigit }) {
+                            let aa = backupRoot
+                                .appendingPathComponent(String(path.prefix(2)))
+                                .appendingPathComponent(path)
+                            if FileManager.default.fileExists(atPath: aa.path) { return aa }
+                        }
+                        return nil
+                    },
+                    progress: { f, _ in tick(); if f >= 0 { progress(f) } })
+            }
 
             lastRestoreDeviceConfirmed = confirmed
             guard confirmed else {
@@ -179,200 +222,83 @@ actor LoopbackTransport: DeviceTransport {
         defer { lockdown.close() }
         try await lockdown.reboot()
     }
-}
 
-// MARK: - Manifest.db patcher
+    // MARK: - Partial restore (iOS 16–26, synthesized sparse backup)
 
-/// Registers injected payload files in the PULLED Manifest.db so the
-/// device requests them during restore.
-///
-/// What is measured (not invented):
-/// - The Files table lives in the real pulled Manifest.db; the patcher
-///   refuses to run if the table is absent.
-/// - Row shape (domain, relativePath, flags, file blob) is COPIED from a
-///   template row of the same backup — preferably the same domain.
-/// - AppDomain-* entries must already be registered in Manifest.plist
-///   "Applications" (else the device answers MBErrorDomain/205
-///   "Unknown domain name" — GoldenNugget research).
-///
-/// UNVERIFIED (needs a device with a real pulled Manifest.db):
-/// - fileID derivation: hex SHA1("domain-relativePath"). Verified for the
-///   legacy .mbdb format (research: measured); assumed identical for the
-///   Manifest.db Files.fileID column. Confirm by comparing against a
-///   known row from a real pull before trusting a push.
-/// - The copied `file` metadata blob is used verbatim from the template
-///   row (Size is refreshed when the blob decodes and carries a Size key;
-///   otherwise left untouched). Whether the device tolerates this for
-///   brand-new rows is device-testable only.
-struct ManifestDBPatcher {
-    struct PatchResult: Sendable {
-        let insertedRows: Int
-        /// fileID → local payload file, for the DownloadFiles resolver.
-        let fileIDMap: [String: URL]
-    }
-
-    struct Entry: Decodable {
-        let fileName: String
-        let domain: String
-        let restorePath: String
-    }
-
-    static func patch(backupRoot: URL) throws -> PatchResult {
-        // The payload manifest lives next to the backup staging dir:
-        // <staging>/Payload/payload-manifest.json  vs  <staging>/FullBackup
-        let manifestURL = backupRoot.deletingLastPathComponent()
-            .appendingPathComponent("Payload/\(PayloadPhase.manifestFileName)")
-        guard let manifestData = try? Data(contentsOf: manifestURL),
-              let entries = try? JSONDecoder().decode([Entry].self, from: manifestData),
-              !entries.isEmpty
-        else {
-            // No payload staged — push the backup as pulled, honestly.
-            return PatchResult(insertedRows: 0, fileIDMap: [:])
-        }
-
-        let dbURL = backupRoot.appendingPathComponent("Manifest.db")
-        guard FileManager.default.fileExists(atPath: dbURL.path) else {
+    func deviceUDID() async throws -> String {
+        let (lockdown, _, udid) = try await handshakedLockdown()
+        defer { lockdown.close() }
+        guard !udid.isEmpty, udid != "device" else {
             throw RestoreError.phaseFailed(
                 phase: .restore,
-                message: "Manifest.db missing in pulled backup — cannot register payload rows.")
+                message: "Device did not report a UDID — refusing to guess one for the synthetic backup.")
         }
+        return udid
+    }
 
-        // AppDomain guard (verified failure mode: 205 "Unknown domain name").
-        let appDomains = Set(entries.map(\.domain).filter { $0.hasPrefix("AppDomain") })
-        if !appDomains.isEmpty {
-            let manifestPlistURL = backupRoot.appendingPathComponent("Manifest.plist")
-            guard let data = try? Data(contentsOf: manifestPlistURL) else {
-                throw RestoreError.phaseFailed(
-                    phase: .restore, message: "Manifest.plist unreadable; cannot verify AppDomain registration.")
-            }
-            var fmt = PropertyListSerialization.PropertyListFormat.xml
-            guard let plist = try? PropertyListSerialization.propertyList(from: data, options: [], format: &fmt),
-                  let dict = plist as? [String: Any],
-                  let apps = dict["Applications"] as? [String: Any]
-            else {
-                throw RestoreError.phaseFailed(
-                    phase: .restore, message: "Manifest.plist unreadable; cannot verify AppDomain registration.")
-            }
-            for domain in appDomains {
-                // "AppDomain-com.example.app" → bundle id after the dash.
-                let bundleID = domain.split(separator: "-", maxSplits: 1).last.map(String.init) ?? ""
-                guard apps[bundleID] != nil else {
-                    throw RestoreError.phaseFailed(
-                        phase: .restore,
-                        message: "\(domain) is not registered in Manifest.plist Applications — the device would answer 205.")
-                }
-            }
-        }
-
-        var db: OpaquePointer?
-        guard sqlite3_open(dbURL.path, &db) == SQLITE_OK, let db = db else {
-            throw RestoreError.phaseFailed(phase: .restore, message: "Cannot open Manifest.db.")
-        }
-        defer { sqlite3_close(db) }
-
-        // Refuse if the Files table isn't there (schema drift) — never guess.
-        if !tableExists(db, "Files") {
+    func pushPartialRestore(from backupRoot: URL, udid: String,
+                            progress: @Sendable (Double) -> Void) async throws -> Int {
+        let (lockdown, identity, handshakeUDID) = try await handshakedLockdown()
+        defer { lockdown.close() }
+        guard handshakeUDID == udid else {
             throw RestoreError.phaseFailed(
-                phase: .restore, message: "Manifest.db has no Files table — refusing to guess the schema.")
+                phase: .restore,
+                message: "Device identity changed mid-run (backup built for \(udid), now \(handshakeUDID)) — refusing to push to the wrong device.")
         }
 
-        var inserted = 0
-        var fileIDMap: [String: URL] = [:]
-        let payloadDir = manifestURL.deletingLastPathComponent()
-
-        for entry in entries {
-            let fileID = sha1Hex("\(entry.domain)-\(entry.restorePath)")
-            let localURL = payloadDir.appendingPathComponent(entry.fileName)
-            guard FileManager.default.fileExists(atPath: localURL.path) else {
-                throw RestoreError.phaseFailed(
-                    phase: .restore,
-                    message: "Payload file missing: \(entry.fileName) for \(entry.domain):\(entry.restorePath)")
-            }
-            fileIDMap[fileID] = localURL
-
-            let (flags, blob) = try templateRow(db, domain: entry.domain)
-            let fileSize = (try? FileManager.default.attributesOfItem(atPath: localURL.path)[.size] as? NSNumber)?.uint64Value ?? 0
-            let adjustedBlob = refreshSize(in: blob, to: fileSize)
-
-            var stmt: OpaquePointer?
-            let sql = "INSERT OR REPLACE INTO Files (fileID, domain, relativePath, flags, file) VALUES (?, ?, ?, ?, ?)"
-            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK, let stmt = stmt else {
-                throw RestoreError.phaseFailed(
-                    phase: .restore,
-                    message: "Manifest.db: prepare failed: \(String(cString: sqlite3_errmsg(db)))")
-            }
-            defer { sqlite3_finalize(stmt) }
-            sqlite3_bind_text(stmt, 1, fileID, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
-            sqlite3_bind_text(stmt, 2, entry.domain, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
-            sqlite3_bind_text(stmt, 3, entry.restorePath, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
-            sqlite3_bind_int64(stmt, 4, flags)
-            adjustedBlob.withUnsafeBytes { ptr in
-                _ = sqlite3_bind_blob(stmt, 5, ptr.baseAddress, Int32(adjustedBlob.count),
-                                       unsafeBitCast(-1, to: sqlite3_destructor_type.self))
-            }
-            guard sqlite3_step(stmt) == SQLITE_DONE else {
-                throw RestoreError.phaseFailed(
-                    phase: .restore,
-                    message: "Manifest.db: insert failed for \(entry.domain):\(entry.restorePath): \(String(cString: sqlite3_errmsg(db)))")
-            }
-            inserted += 1
+        let (port, serviceSSL) = try await lockdown.startService(
+            "com.apple.mobilebackup2", escrowBag: identity.escrowBag)
+        if serviceSSL {
+            throw RestoreError.phaseFailed(
+                phase: .restore, message: "mobilebackup2 asked for service-level SSL; no verified flow")
         }
-        return PatchResult(insertedRows: inserted, fileIDMap: fileIDMap)
-    }
 
-    // MARK: - internals
-
-    private static func tableExists(_ db: OpaquePointer, _ name: String) -> Bool {
-        var stmt: OpaquePointer?
-        defer { sqlite3_finalize(stmt) }
-        guard sqlite3_prepare_v2(db, "SELECT name FROM sqlite_master WHERE type='table' AND name=?", -1, &stmt, nil) == SQLITE_OK,
-              let stmt = stmt
-        else { return false }
-        sqlite3_bind_text(stmt, 1, name, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
-        return sqlite3_step(stmt) == SQLITE_ROW
-    }
-
-    /// (flags, file-blob) copied from a real row of the same backup —
-    /// measured, not invented. Prefers the same domain.
-    private static func templateRow(_ db: OpaquePointer, domain: String) throws -> (Int64, Data) {
-        for query in [
-            "SELECT flags, file FROM Files WHERE domain = ? LIMIT 1",
-            "SELECT flags, file FROM Files LIMIT 1",
-        ] {
-            var stmt: OpaquePointer?
-            defer { sqlite3_finalize(stmt) }
-            guard sqlite3_prepare_v2(db, query, -1, &stmt, nil) == SQLITE_OK, let stmt = stmt else { continue }
-            if query.contains("WHERE") {
-                sqlite3_bind_text(stmt, 1, domain, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+        let mb2 = MobileBackup2Client(port: port)
+        // Cooperative cancel lives BETWEEN phases: a restore exchange
+        // already in flight is never cut (cutting it mid-write is worse
+        // than letting it land).
+        await mb2.setCancelled { false }
+        do {
+            _ = try await mb2.connect()
+            // Inner I/O watchdog, same as the full route: a wedged
+            // device aborts instead of hanging forever.
+            let (confirmed, served) = try await withIOWatchdog(
+                phase: .restore, operation: "partial restore",
+                onStall: { await mb2.disconnect() }
+            ) { tick in
+                try await mb2.runPartialRestore(
+                    targetID: udid, sourceID: udid, password: backupPassword,
+                    from: backupRoot,
+                    progress: { f, _ in tick(); if f >= 0 { progress(f) } })
             }
-            if sqlite3_step(stmt) == SQLITE_ROW {
-                let flags = sqlite3_column_int64(stmt, 0)
-                let bytes = sqlite3_column_blob(stmt, 1)
-                let count = Int(sqlite3_column_bytes(stmt, 1))
-                let blob = bytes.map { Data(bytes: $0, count: count) } ?? Data()
-                return (flags, blob)
+
+            lastRestoreDeviceConfirmed = confirmed
+            guard confirmed else {
+                throw RestoreError.phaseFailed(
+                    phase: .restore, message: "The device did not confirm the partial restore landed.")
             }
+            await mb2.disconnect()
+            return served
+        } catch {
+            await mb2.disconnect()
+            throw error
         }
-        throw RestoreError.phaseFailed(
-            phase: .restore, message: "Manifest.db has no template row to copy the file-metadata shape from.")
     }
 
-    /// If the metadata blob decodes as a plist carrying a Size key, refresh
-    /// it to the real file size. Otherwise the blob is left untouched —
-    /// never invent keys.
-    private static func refreshSize(in blob: Data, to size: UInt64) -> Data {
-        guard !blob.isEmpty else { return blob }
-        var fmt = PropertyListSerialization.PropertyListFormat.xml
-        guard let obj = try? PropertyListSerialization.propertyList(from: blob, options: [], format: &fmt),
-              var dict = obj as? [String: Any],
-              dict["Size"] is NSNumber
-        else { return blob }
-        dict["Size"] = NSNumber(value: size)
-        return (try? PropertyListSerialization.data(fromPropertyList: dict, format: .binary, options: 0)) ?? blob
-    }
-
-    private static func sha1Hex(_ string: String) -> String {
-        let digest = Insecure.SHA1.hash(data: Data(string.utf8))
-        return digest.map { String(format: "%02x", $0) }.joined()
+    func waitForDeviceOnline(timeoutSeconds: TimeInterval = 300) async -> Bool {
+        // Fresh handshake on every poll — the pre-reboot session is dead
+        // by definition (desktop: wait_for_ios27_device_online).
+        let deadline = Date().addingTimeInterval(timeoutSeconds)
+        while Date() < deadline {
+            do {
+                let (lockdown, _, _) = try await handshakedLockdown()
+                lockdown.close()
+                return true
+            } catch {
+                // Not back yet (or trust dialog pending) — keep polling.
+            }
+            try? await Task.sleep(nanoseconds: 5_000_000_000)
+        }
+        return false
     }
 }

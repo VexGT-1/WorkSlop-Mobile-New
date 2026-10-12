@@ -17,6 +17,7 @@ enum BackupPhase {
         request: RestoreRequest,
         stagingRoot: URL,
         transport: DeviceTransport,
+        watchdog: StallWatchdog,
         progress: @Sendable (RestoreProgress) -> Void,
         isCancelled: @Sendable () -> Bool
     ) async throws -> Result {
@@ -31,15 +32,32 @@ enum BackupPhase {
         let backupRoot = stagingRoot.appendingPathComponent("FullBackup", isDirectory: true)
         try FileManager.default.createDirectory(at: backupRoot, withIntermediateDirectories: true)
 
-        // From here the device must be spoken to. Without the transport
-        // this throws RestoreError.unimplemented — it never pretends a
-        // full backup was pulled.
         progress(RestoreProgress(phase: .backup, fraction: 0.25, message: "Pulling full backup from device…"))
-        _ = try await transport.pullFullBackup(to: backupRoot) { _ in }
+        // Gap 12 fix: every device progress tick proves liveness
+        // (desktop's _backup_cb). The closure is synchronous, so the
+        // actor tick goes through a Task hop — the tick is idempotent.
+        let pulledRoot = try await transport.pullFullBackup(to: backupRoot) { f in
+            Task { await watchdog.noteProgress() }
+            if f >= 0 {
+                progress(RestoreProgress(phase: .backup,
+                                         fraction: 0.25 + 0.70 * f,
+                                         message: "Pulling full backup… \(Int(f * 100))%"))
+            }
+        }
 
-        // Unreachable until a transport exists. Kept as the contract:
-        // a pulled backup lands at backupRoot and the run continues.
-        return Result(backupRoot: backupRoot, prerequisites: checks)
+        // Encrypted PRE-check (desktop: pre-check before anything is
+        // written). The injector re-checks before touching Manifest.db
+        // (post-check). Encrypted backups are refused at both gates:
+        // plaintext injection has no matching wrapped key (MBErrorDomain/205).
+        if BackupInjector.isEncryptedBackup(at: pulledRoot) {
+            throw RestoreError.phaseFailed(
+                phase: .backup,
+                message: "The pulled backup is encrypted (Manifest.plist IsEncrypted). " +
+                "This route cannot write into an encrypted backup safely — turn off backup " +
+                "encryption and try again. Nothing was written; the device was not changed.")
+        }
+
+        return Result(backupRoot: pulledRoot, prerequisites: checks)
     }
 
     // MARK: - Prerequisite gates (all real, all local)
@@ -78,6 +96,16 @@ enum BackupPhase {
             status: request.findMyDisabledAttested
                 ? .attestedUnverifiable(note: "User attested Find My is OFF. The sandbox cannot verify this — restoring with Find My ON risks activation issues.")
                 : .failed(reason: "Find My must be OFF before a full restore. Confirm it in Settings, then attest.")
+        ))
+
+        checks.append(PrerequisiteCheck(
+            name: "iOS 27 risk warning",
+            // G1 full route only: the partial (sparse) engine reuses these
+            // checks but never writes a full backup, so the bootloop
+            // warning does not apply there.
+            status: request.deviceVersion.major < 27 || request.riskWarningAccepted
+                ? .passed
+                : .failed(reason: G1Support.riskWarningText)
         ))
 
         return checks

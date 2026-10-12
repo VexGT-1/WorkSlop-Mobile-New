@@ -7,11 +7,18 @@ import Foundation
 struct RestoreRequest: Sendable {
     /// From lockdown at run time — never guessed, never empty.
     let deviceVersion: DeviceVersion
+    /// Build number from lockdown ("24A5355q"); nil when the caller
+    /// couldn't read it — the version gate still applies (all 27.0
+    /// variants report ProductVersion "27.0").
+    let deviceBuild: String? = nil
     /// Feature IDs the user staged (from PayloadSpec catalog).
     let stagedFeatureIDs: Set<String>
     /// Find My cannot be verified from the sandbox; the user attests it.
     /// Restoring with Find My ON risks activation issues — recorded, not faked.
     let findMyDisabledAttested: Bool
+    /// The iOS 27 bootloop risk warning was shown and explicitly accepted.
+    /// Fail-closed: BackupPhase refuses the run without it.
+    let riskWarningAccepted: Bool = false
     /// Label for the staging directory (UDID when known, else "device").
     let deviceLabel: String
     let backupPassword: String?
@@ -44,6 +51,14 @@ final class CancelFlag: @unchecked Sendable {
 /// Abort only after 10 minutes with zero progress. A healthy full
 /// backup/restore is never cut off for being slow — the old hard
 /// 12-minute deadline is gone on purpose.
+///
+/// NOTE (Gap 12 fix): the actor is kept (the parallel partial engine
+/// calls it the same way), but ticks now come from EVERY transport
+/// progress callback via a Task hop — the progress closures are
+/// synchronous and cannot await. `check()` gates the START of the next
+/// phase; it is never run after a phase completed (that was the old
+/// false-stall wiring: note-then-check always passed, and real mid-phase
+/// stalls were invisible).
 actor StallWatchdog {
     private var lastProgress = Date()
     private let stallLimit: TimeInterval = 600
@@ -57,6 +72,62 @@ actor StallWatchdog {
     }
 }
 
+// MARK: - Inner device-I/O watchdog (desktop: run_with_stall_watchdog)
+
+/// Lock-guarded last-tick timestamp. Sync-tickable from non-async
+/// progress closures; read by the watchdog poll loop.
+final class IOActivity: @unchecked Sendable {
+    private let lock = NSLock()
+    private var lastTick = Date()
+
+    func tick() { lock.withLock { lastTick = Date() } }
+    func silentFor() -> TimeInterval {
+        lock.withLock { Date().timeIntervalSince(lastTick) }
+    }
+}
+
+/// Runs one transport call under the inner stall watchdog (desktop:
+/// run_with_stall_watchdog, 300s). Every progress tick proves the device
+/// alive. If the device goes quiet for `stallSeconds` mid-transfer, the
+/// call is abandoned via `onStall` (which must unblock the hung socket —
+/// without it the body child would never finish and the task group
+/// would hang on exit) and `.ioStalled` is thrown.
+///
+/// This is NOT user cancel: a wedged device (zero progress for 5 minutes)
+/// is already dead — desktop treats the same condition as retryable.
+/// User cancel stays phase-boundary-only (see start()).
+func withIOWatchdog<T>(
+    phase: RestorePhaseID,
+    operation: String,
+    stallSeconds: TimeInterval = 300,
+    onStall: (@Sendable () async -> Void)? = nil,
+    body: @Sendable (@Sendable () -> Void) async throws -> T
+) async throws -> T {
+    let activity = IOActivity()
+    return try await withThrowingTaskGroup(of: T.self) { group in
+        group.addTask {
+            try await body { activity.tick() }
+        }
+        group.addTask { () throws -> T in
+            while true {
+                try await Task.sleep(nanoseconds: 5_000_000_000)
+                if activity.silentFor() >= stallSeconds {
+                    if let onStall { await onStall() }
+                    throw RestoreError.ioStalled(
+                        phase: phase, operation: operation,
+                        seconds: Int(stallSeconds))
+                }
+            }
+        }
+        guard let result = try await group.next() else {
+            throw RestoreError.ioStalled(
+                phase: phase, operation: operation, seconds: Int(stallSeconds))
+        }
+        group.cancelAll()
+        return result
+    }
+}
+
 // MARK: - Orchestrator
 
 /// The iOS 27 method, in the exact mandated order:
@@ -64,8 +135,9 @@ actor StallWatchdog {
 ///
 /// An actor: state transitions are serialized, and `start` while a run is
 /// in flight throws `.alreadyInFlight` instead of stacking runs.
-/// Phases receive `onProgress` directly — no wrapper closures, so the
-/// whole chain stays Sendable-clean under Swift 6.
+/// Backup/restore phase progress closures also tick the stall watchdog
+/// (via a Task hop — the closures are synchronous), so a quiet device
+/// trips the watchdog instead of hanging the run.
 actor RestoreEngine {
     static let shared = RestoreEngine()
 
@@ -77,17 +149,26 @@ actor RestoreEngine {
         cancelFlag?.cancel()
     }
 
-    /// Run the full method. The default transport is the real loopback
-    /// transport (lockdown + mobilebackup2 over the tunnel app).
+    /// Run the method for this device's iOS version.
+    ///
+    /// Version routing (the old code threw `.unsupportedVersion` for
+    /// iOS <27 and left iOS 26 as UI text only):
+    /// - iOS 16–26 → PartialRestoreEngine (sparse restore, no full
+    ///   backup). The agreed seam; that engine owns its own phases.
+    /// - iOS 27+   → the strict allowlist below (G1Support), then the
+    ///   full BACKUP → PAYLOAD → MODIF → RESTORE → RESTART method.
+    ///
+    /// Cancel is honored BETWEEN phases only. Once the restore push
+    /// starts, user cancel no longer interrupts it (desktop: never cut
+    /// an in-flight restore) — the check before phase 4 is the last
+    /// cancel point before the device is written, and restore+restart
+    /// then run as one atomic unit.
     func start(
         request: RestoreRequest,
         transport: DeviceTransport = LoopbackTransport(),
         onProgress: @Sendable @escaping (RestoreProgress) -> Void
     ) async throws {
         guard case .idle = state else { throw RestoreError.alreadyInFlight }
-        guard request.deviceVersion.isIOS27OrLater else {
-            throw RestoreError.unsupportedVersion(major: request.deviceVersion.major)
-        }
         guard !request.stagedFeatureIDs.isEmpty else {
             throw RestoreError.nothingStaged
         }
@@ -102,31 +183,76 @@ actor RestoreEngine {
             if flag.isCancelled || Task.isCancelled { throw RestoreError.cancelled }
         }
 
+        // — Version routing —
+        let major = request.deviceVersion.major
+        if (16...26).contains(major) {
+            // Partial-restore route: no full backup, no G1 phases.
+            // Progress flows through onProgress; the phase vocabulary
+            // below is the G1 route's (the partial engine reports bare
+            // fractions, mapped here onto .restore).
+            state = .running(.restore)
+            defer { cancelFlag = nil }
+            do {
+                let partialProgress: @Sendable (Double) -> Void = { f in
+                    onProgress(RestoreProgress(
+                        phase: .restore, fraction: f,
+                        message: "Partial restore… \(Int(f * 100))%"))
+                }
+                try await PartialRestoreEngine.shared.run(
+                    request: request, transport: transport,
+                    onProgress: partialProgress)
+                state = .succeeded
+            } catch let error as RestoreError {
+                if case .cancelled = error {
+                    state = .cancelled
+                } else {
+                    state = .failed(error.localizedDescription)
+                }
+                throw error
+            } catch {
+                state = .failed(error.localizedDescription)
+                throw error
+            }
+            return
+        }
+        guard G1Support.isSupported(version: request.deviceVersion,
+                                    build: request.deviceBuild)
+        else {
+            throw RestoreError.osVersionNotSupported(
+                version: request.deviceVersion.description,
+                build: request.deviceBuild)
+        }
+
         do {
             // — Phase 1: BACKUP ALL DATA FULL —
+            // check() gates the START of each phase: a stall between
+            // phases aborts before new work begins, never after it landed.
+            try await watchdog.check(phase: .backup)
+            try throwIfCancelled()
             state = .running(.backup)
             await watchdog.noteProgress()
-            try throwIfCancelled()
             let backupResult = try await BackupPhase.run(
                 request: request, stagingRoot: stagingRoot, transport: transport,
-                progress: onProgress, isCancelled: cancelled
+                watchdog: watchdog, progress: onProgress, isCancelled: cancelled
             )
             await watchdog.noteProgress()
-            try throwIfCancelled()
-            try await watchdog.check(phase: .backup)
 
             // — Phase 2: PAYLOAD FILE (dozens of locations, per active tweaks) —
+            try await watchdog.check(phase: .payload)
+            try throwIfCancelled()
             state = .running(.payload)
+            await watchdog.noteProgress()
             let payloadResult = try await PayloadPhase.run(
                 request: request, stagingRoot: stagingRoot,
                 progress: onProgress, isCancelled: cancelled
             )
             await watchdog.noteProgress()
-            try throwIfCancelled()
-            try await watchdog.check(phase: .payload)
 
-            // — Phase 3: MODIF (inject payload into the backup staging) —
+            // — Phase 3: MODIF (real injection into the pulled backup) —
+            try await watchdog.check(phase: .modify)
+            try throwIfCancelled()
             state = .running(.modify)
+            await watchdog.noteProgress()
             _ = try await ModifyPhase.run(
                 request: request,
                 backupRoot: backupResult.backupRoot,
@@ -134,23 +260,29 @@ actor RestoreEngine {
                 progress: onProgress, isCancelled: cancelled
             )
             await watchdog.noteProgress()
-            try throwIfCancelled()
-            try await watchdog.check(phase: .modify)
 
             // — Phase 4: RESTORE FULL —
+            // Last cancel point before the device is written. After the
+            // push starts, cancel no longer interrupts it.
+            try await watchdog.check(phase: .restore)
+            try throwIfCancelled()
             state = .running(.restore)
+            await watchdog.noteProgress()
             try await RestorePhase.run(
                 request: request,
                 backupRoot: backupResult.backupRoot,
-                transport: transport,
+                transport: transport, watchdog: watchdog,
                 progress: onProgress, isCancelled: cancelled
             )
             await watchdog.noteProgress()
-            try throwIfCancelled()
-            try await watchdog.check(phase: .restore)
 
             // — Phase 5: RESTART (with restart notification) —
+            // Part of the same atomic unit as the restore once it landed:
+            // not skipped by a mid-restore cancel. Verifies the device
+            // comes back online before reporting success.
+            try await watchdog.check(phase: .restart)
             state = .running(.restart)
+            await watchdog.noteProgress()
             _ = try await RestartPhase.run(transport: transport, progress: onProgress)
             await watchdog.noteProgress()
 

@@ -28,17 +28,6 @@ targets:
             UTTypeTagSpecification:
               public.filename-extension:
                 - batter
-        CFBundleIcons:
-          CFBundleAlternateIcons:
-            IconPurple:
-              CFBundleIconFiles:
-                - IconPurple
-            IconBlue:
-              CFBundleIconFiles:
-                - IconBlue
-            IconGray:
-              CFBundleIconFiles:
-                - IconGray
     sources:
       - path: WorkSlop
         excludes:

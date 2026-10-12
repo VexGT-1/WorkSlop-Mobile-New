@@ -60,6 +60,57 @@ struct DeviceVersion: Sendable, Equatable {
     var description: String { "\(major).\(minor).\(patch)" }
 }
 
+// MARK: - iOS 27 route support (strict allowlist, desktop parity)
+
+/// Strict eligibility for the iOS 27 full method, mirroring desktop's
+/// is_ios27_g1_supported: ProductVersion 27.0 (covers Developer Beta 1–9,
+/// RC and stable — all report "27.0") or 27.0.1, or a verified build
+/// number. `major >= 27` alone wrongly admitted 27.2+/28.x, which the
+/// desktop deliberately refuses.
+enum G1Support {
+    static let supportedBuilds: Set<String> = [
+        "24A5355q", "24A5370h", "24A5380h", "24A5390f",
+        "24A5408d", "24A5418b", "24A5424a", "24A5430a",
+        "24A435", "24A437",
+    ]
+
+    static func isSupported(version: DeviceVersion, build: String?) -> Bool {
+        if version.major == 27 && version.minor == 0 && version.patch <= 1 {
+            return true
+        }
+        if let build, !build.isEmpty, supportedBuilds.contains(build) {
+            return true
+        }
+        return false
+    }
+
+    /// Pre-apply warning (desktop: IOS27_WARNING_TEXT). The UI must show
+    /// this and record riskWarningAccepted before the run starts; the
+    /// engine fail-closes without the acceptance.
+    static let riskWarningTitle = "iOS 27 — Risk Warning"
+
+    static let riskWarningText = """
+        WARNING: applying tweaks on iOS 27 is experimental and risky.
+
+        iOS 27 can put your iPhone into a BOOTLOOP (stuck on the Apple logo, \
+        will not start). A full backup of ALL your data is taken before \
+        anything is written, but a backup cannot undo every kind of damage.
+
+        The owner of this software (Adnan.120hz) is NOT responsible for any \
+        damage, bootloop, or data loss caused by using it on iOS 27.
+
+        Your device backup must NOT be encrypted (uncheck 'Encrypt local \
+        backup'), otherwise the apply is refused before anything is written.
+
+        Only continue if you have a backup and accept the full risk.
+        """
+
+    static let notSupportedMessage =
+        "Not supported: this device runs an iOS version outside the supported " +
+        "list (iOS 27.0 Developer Beta 1–9, 27.0 RC, 27.0 official, 27.0.1). " +
+        "Nothing was applied."
+}
+
 // MARK: - Prerequisites
 
 enum PrerequisiteStatus: Sendable {
@@ -104,12 +155,19 @@ enum RestoreError: Error, LocalizedError, Sendable {
     case versionUnknown
     /// The run was started with zero staged tweaks — meaningless, refused.
     case nothingStaged
-    /// This engine is the iOS 27 method; older majors take another path.
-    case unsupportedVersion(major: Int)
+    /// The device failed the strict iOS 27 allowlist (not just major>=27).
+    case osVersionNotSupported(version: String, build: String?)
+    /// The partial (sparse) engine covers iOS 16–26; iOS 27+ takes the
+    /// full engine.
+    case versionOutsidePartialRange(major: Int)
     case prerequisitesFailed([PrerequisiteCheck])
     /// Stall-based watchdog: no progress for 10 minutes. No hard deadline —
     /// a healthy backup/restore is never cut off for being slow.
     case stalled(phase: RestorePhaseID)
+    /// Inner device-I/O watchdog (desktop: run_with_stall_watchdog, 300s):
+    /// the device went quiet mid-transfer. Distinct from .stalled, which
+    /// is the 10-minute route-level backstop.
+    case ioStalled(phase: RestorePhaseID, operation: String, seconds: Int)
     case diskSpaceInsufficient(neededBytes: Int64, availableBytes: Int64)
     /// Something the app genuinely cannot do yet. Thrown loudly with the
     /// missing piece named — never silently faked as success.
@@ -127,13 +185,20 @@ enum RestoreError: Error, LocalizedError, Sendable {
             return "Device version is unknown. The run is refused rather than guessing (a guessed version once sent a 27.0 device down the wrong branch)."
         case .nothingStaged:
             return "No tweaks staged. Stage at least one tweak before running the restore method."
-        case .unsupportedVersion(let major):
-            return "This engine implements the iOS 27 full backup/restore method; device reports iOS \(major), which takes a different path."
+        case .osVersionNotSupported(let version, let build):
+            let b = (build?.isEmpty == false) ? " (build \(build!))" : ""
+            return "Not supported: device reports iOS \(version)\(b) — outside the supported " +
+                "list (iOS 27.0 Developer Beta 1–9, 27.0 RC, 27.0 official, 27.0.1). Nothing was applied."
+        case .versionOutsidePartialRange(let major):
+            return "Partial (sparse) restore covers iOS 16–26; device reports iOS \(major), which takes the iOS 27 full engine."
         case .prerequisitesFailed(let checks):
             let bad = checks.filter { !$0.isOK }.map { $0.name }.joined(separator: ", ")
             return "Prerequisites failed: \(bad)."
         case .stalled(let phase):
             return "Stalled in \(phase.displayName): no progress for 10 minutes. Aborting rather than hanging forever."
+        case .ioStalled(let phase, let operation, let seconds):
+            return "Device stopped reporting \(operation) progress for \(seconds)s in \(phase.displayName) — " +
+                "the transfer is wedged. Aborted so it cannot hang forever; the device was not left half-written by us."
         case .diskSpaceInsufficient(let needed, let available):
             return "Not enough free space for a full backup: need \(needed) bytes, have \(available)."
         case .unimplemented(let what, let needed):

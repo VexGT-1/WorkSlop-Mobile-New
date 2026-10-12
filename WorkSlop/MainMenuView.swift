@@ -39,8 +39,19 @@ struct MainMenuView: View {
                     }
                     .padding()
                 }
+                .onChange(of: pairingNote) { _, new in
+                    // Transient notes only: clear after 6s so a stale
+                    // message never sits on screen.
+                    guard let current = new else { return }
+                    Task { @MainActor in
+                        try? await Task.sleep(for: .seconds(6))
+                        if pairingNote == current {
+                            pairingNote = nil
+                        }
+                    }
+                }
             }
-            .navigationTitle("WorkSlop")
+            .navigationBarTitleDisplayMode(.inline)
             .navigationDestination(for: HomeRoute.self) { route in
                 switch route {
                 case .allTweaks: AllTweaksView()
@@ -63,8 +74,8 @@ struct MainMenuView: View {
             allowedContentTypes: [.propertyList]
         ) { result in
             switch result {
-            case .success(let url): pairingNote = importPairing(from: url)
-            case .failure: pairingNote = "Import cancelled."
+            case .success(let url): flashNote(importPairing(from: url) ?? "Pairing file saved.")
+            case .failure: flashNote("Import cancelled.")
             }
         }
         .sheet(isPresented: $showTunnelInfo) { TunnelInfoView() }
@@ -91,6 +102,7 @@ struct MainMenuView: View {
                         .font(.title3)
                         .foregroundStyle(.secondary)
                 }
+                .buttonStyle(.plain)
                 .accessibilityIdentifier("about-info")
             }
             Text("\(DeviceStatus.modelOrDash) • \(DeviceInfoEx.versionWithBuild)")
@@ -102,6 +114,9 @@ struct MainMenuView: View {
 
     // MARK: - Device gates
 
+    /// One status card: pairing file and VPN tunnel share a card with a
+    /// divider between them. Secondary actions are plain text links
+    /// (never gray pills) so the Apply button keeps its visual hierarchy.
     private var deviceCard: some View {
         VStack(spacing: 0) {
             HStack {
@@ -115,7 +130,7 @@ struct MainMenuView: View {
                     .foregroundStyle(status.pairingImported ? Color.green : .secondary)
                     .fontWeight(status.pairingImported ? .semibold : .regular)
             }
-            .padding(.vertical, 10)
+            .padding(.vertical, 12)
 
             HStack {
                 Button(status.pairingImported ? "Re-import pairing file" : "Import pairing file (.plist)") {
@@ -128,22 +143,23 @@ struct MainMenuView: View {
                         do {
                             try FileManager.default.removeItem(at: PairingStore.fileURL)
                             status.pairingChanged()
-                            pairingNote = "Pairing file deleted from the app container."
+                            flashNote("Pairing file deleted from the app container.")
                         } catch {
-                            pairingNote = "Could not delete the pairing file: \(error.localizedDescription)"
+                            flashNote("Could not delete the pairing file: \(error.localizedDescription)")
                         }
                     }
                 }
             }
             .font(.subheadline)
-            .padding(.bottom, 4)
+            .buttonStyle(.plain)
+            .padding(.bottom, 12)
 
             if let pairingNote {
                 Text(pairingNote)
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.bottom, 4)
+                    .padding(.bottom, 12)
             }
 
             Divider()
@@ -159,7 +175,7 @@ struct MainMenuView: View {
                     .foregroundStyle(status.vpnDetected ? Color.green : .secondary)
                     .fontWeight(status.vpnDetected ? .semibold : .regular)
             }
-            .padding(.vertical, 10)
+            .padding(.vertical, 12)
             .accessibilityIdentifier("status-vpn")
 
             HStack {
@@ -174,9 +190,17 @@ struct MainMenuView: View {
                     .accessibilityIdentifier("refresh-status")
             }
             .font(.subheadline)
+            .buttonStyle(.plain)
         }
         .padding(.horizontal, 16)
         .background(cardBackground)
+    }
+
+    /// Shows a transient note under the pairing row, then clears it so a
+    /// stale message never lingers on screen (the "deleted" note in the
+    /// screenshot was from an old action).
+    private func flashNote(_ note: String) {
+        pairingNote = note
     }
 
     // MARK: - Apply
@@ -208,29 +232,45 @@ struct MainMenuView: View {
 
     // MARK: - Menus
 
+    /// Native-style navigation rows: representative SF Symbols, a
+    /// disclosure chevron, clean dividers. No pill buttons here.
     private var menusCard: some View {
         VStack(spacing: 0) {
             NavigationLink(value: HomeRoute.allTweaks) {
-                Label {
-                    Text("All Tweaks")
-                } icon: {
-                    RowIcon(name: "info.circle")
+                HStack {
+                    Label {
+                        Text("All Tweaks")
+                    } icon: {
+                        RowIcon(name: "sparkles")
+                    }
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(.tertiary)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.vertical, 12)
             }
+            .buttonStyle(.plain)
             .accessibilityIdentifier("menu-all-tweaks")
             Divider()
-                .padding(.leading, 38)
+                .padding(.leading, 46)
             NavigationLink(value: HomeRoute.settings) {
-                Label {
-                    Text("Settings")
-                } icon: {
-                    RowIcon(name: "gear")
+                HStack {
+                    Label {
+                        Text("Settings")
+                    } icon: {
+                        RowIcon(name: "gear")
+                    }
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(.tertiary)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.vertical, 12)
             }
+            .buttonStyle(.plain)
             .accessibilityIdentifier("menu-settings")
         }
         .padding(.horizontal, 16)

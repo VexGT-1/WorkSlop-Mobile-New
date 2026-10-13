@@ -18,6 +18,7 @@ final class AirFlitViewModel: ObservableObject {
     @Published var result: String?
     @Published var resultOK = false
     @Published var pairingNote: String?
+    @Published var hasPairingFile = AirFlitEngine.hasPairingFile
 
     var iosOK: Bool {
         let v = DeviceInfo.iosVersion
@@ -229,6 +230,7 @@ final class AirFlitViewModel: ObservableObject {
         defer { if scoped { url.stopAccessingSecurityScopedResource() } }
         do {
             try AirFlitEngine.savePairingFile(from: url)
+            hasPairingFile = true
             pairingNote = "Pairing file saved for AirFlit."
         } catch {
             pairingNote = "Could not save: \(error.localizedDescription)"

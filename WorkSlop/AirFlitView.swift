@@ -16,8 +16,12 @@ struct AirFlitView: View {
     @StateObject private var vm = AirFlitViewModel()
     @State private var passcodeItem: PhotosPickerItem?
     @State private var walletItem: PhotosPickerItem?
-    @State private var importingPairing = false
-    @State private var importingPassthm = false
+    @State private var importKind: ImportKind?
+
+    enum ImportKind: Identifiable {
+        case pairing, passthm
+        var id: Int { self == .pairing ? 0 : 1 }
+    }
 
     var body: some View {
         ZStack {
@@ -35,11 +39,11 @@ struct AirFlitView: View {
                     HStack {
                         Label("Pairing file", systemImage: "key.fill")
                         Spacer()
-                        Text(AirFlitEngine.hasPairingFile ? "Imported" : "Missing")
-                            .foregroundStyle(AirFlitEngine.hasPairingFile ? .green : .red)
+                        Text(vm.hasPairingFile ? "Imported" : "Missing")
+                            .foregroundStyle(vm.hasPairingFile ? .green : .red)
                     }
                     Button {
-                        importingPairing = true
+                        importKind = .pairing
                     } label: {
                         Label("Import pairing file…", systemImage: "square.and.arrow.down")
                     }
@@ -48,7 +52,7 @@ struct AirFlitView: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
-                    if !AirFlitEngine.hasPairingFile {
+                    if !vm.hasPairingFile {
                         Text("Import the same pairing file you use for WorkSlop (from SideStore / AltStore / etc.). AirFlit keeps its own copy for the AirTraffic channel.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
@@ -60,7 +64,7 @@ struct AirFlitView: View {
                 Section {
                     // .passthm file import (AirCard's native theme format)
                     Button {
-                        importingPassthm = true
+                        importKind = .passthm
                     } label: {
                         Label(vm.passthmURL == nil ? "Import .passthm theme…" : "Change .passthm theme…",
                               systemImage: "doc.zipper")
@@ -98,7 +102,7 @@ struct AirFlitView: View {
                             .frame(maxWidth: .infinity, alignment: .center)
                     }
                     .buttonStyle(.borderedProminent)
-                    .disabled((vm.passcodeImage == nil && vm.passthmURL == nil) || vm.running || !vm.iosOK || !AirFlitEngine.hasPairingFile)
+                    .disabled((vm.passcodeImage == nil && vm.passthmURL == nil) || vm.running || !vm.iosOK || !vm.hasPairingFile)
                     Text("Writes to the TelephonyUI keypad cache. Lock your iPhone to see the new keypad — no restart needed.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -138,7 +142,7 @@ struct AirFlitView: View {
                     }
                     .buttonStyle(.borderedProminent)
                     .disabled(vm.walletImage == nil || vm.walletCardID.trimmingCharacters(in: .whitespaces).isEmpty
-                              || vm.running || !vm.iosOK || !AirFlitEngine.hasPairingFile)
+                              || vm.running || !vm.iosOK || !vm.hasPairingFile)
                     Text("Writes artwork into the card's .pkpass folder and invalidates its cache. Force-close the Wallet app to see changes — no restart needed.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -176,20 +180,26 @@ struct AirFlitView: View {
         }
         .navigationTitle("AirFlit")
         .navigationBarTitleDisplayMode(.inline)
-        .fileImporter(isPresented: $importingPairing, allowedContentTypes: [.propertyList]) { result in
+        .fileImporter(
+            isPresented: Binding(
+                get: { importKind != nil },
+                set: { if !$0 { importKind = nil } }
+            ),
+            allowedContentTypes: importKind == .passthm ? [.zip] : [.propertyList]
+        ) { result in
+            let kind = importKind
+            importKind = nil
             switch result {
             case .success(let url):
-                vm.savePairingFile(from: url)
+                if kind == .passthm {
+                    vm.loadPassthm(from: url)
+                } else {
+                    vm.savePairingFile(from: url)
+                }
             case .failure:
-                vm.pairingNote = "Import cancelled."
-            }
-        }
-        .fileImporter(isPresented: $importingPassthm, allowedContentTypes: [UTType(filenameExtension: "passthm") ?? .zip]) { result in
-            switch result {
-            case .success(let url):
-                vm.loadPassthm(from: url)
-            case .failure:
-                break
+                if kind != .passthm {
+                    vm.pairingNote = "Import cancelled."
+                }
             }
         }
     }

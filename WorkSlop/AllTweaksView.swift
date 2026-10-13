@@ -14,6 +14,8 @@ struct AllTweaksView: View {
         TweakGroup(id: "Apple Internal", icon: "hammer", footer: nil),
         TweakGroup(id: "PosterBoard", icon: "rectangle.on.rectangle", footer: nil),
         TweakGroup(id: "Custom Icons", icon: "app.dashed", footer: nil),
+        TweakGroup(id: "AirFlit", icon: "creditcard",
+                   footer: "Passcode themes + Wallet card images via the AirCard method (AirTraffic). iOS 18.0 – 27.2 beta 2 only."),
     ]
 
     var body: some View {
@@ -22,7 +24,11 @@ struct AllTweaksView: View {
             List {
                 ForEach(groups) { group in
                     NavigationLink {
-                        TweakListView(group: group)
+                        if group.id == "AirFlit" {
+                            AirFlitView()
+                        } else {
+                            TweakListView(group: group)
+                        }
                     } label: {
                         HStack {
                             Label {
@@ -62,6 +68,7 @@ struct TweakGroup: Identifiable, Hashable {
         switch id {
         case "Custom Icons": return IOS18IconCatalog.tintedIcons.count + CustomIconStore.load().count
         case "PosterBoard": return FeatureCatalog.features(in: "PosterBoard").count
+        case "AirFlit": return 2 // Passcode Theme + Wallet Image
         default: return FeatureCatalog.features(in: catalogSection).count
         }
     }

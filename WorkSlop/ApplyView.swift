@@ -18,6 +18,7 @@ import SwiftUI
 struct ApplyView: View {
     @EnvironmentObject private var status: StatusStore
     @EnvironmentObject private var selection: SelectionStore
+    @EnvironmentObject private var iconStage: IconStage
 
     @State private var findMyOff = false
     @State private var riskAccepted = false
@@ -51,8 +52,8 @@ struct ApplyView: View {
     var body: some View {
         List {
             Section {
-                preflightRow("Tweaks staged", ok: !selection.staged.isEmpty,
-                             detail: "\(selection.staged.count)")
+                preflightRow("Tweaks staged", ok: !effectiveStaged.isEmpty,
+                             detail: "\(selection.staged.count + (hasStagedIcons ? 1 : 0))")
                 preflightRow("Pairing file imported", ok: status.pairingImported, detail: nil)
                 preflightRow("VPN tunnel detected", ok: status.vpnDetected, detail: nil)
                 Toggle("Find My is OFF on this iPhone", isOn: $findMyOff)
@@ -208,8 +209,26 @@ struct ApplyView: View {
 
     // MARK: - State
 
+    /// Custom icons with a bundle ID count as staged: they are
+    /// delivered by the same restore payload, so icons alone (no
+    /// other tweak toggled) are enough to enable Apply.
+    private var hasStagedIcons: Bool {
+        iconStage.entries.contains { !$0.bundleID.isEmpty }
+    }
+
+    /// The feature IDs actually sent to the engine: the toggled
+    /// tweaks plus "custom-icons" when icons are staged. The ID is
+    /// injected into the request only (never persisted into
+    /// SelectionStore) so the payload builder's custom-icons gate
+    /// fires and the engine's nothing-staged guard passes.
+    private var effectiveStaged: Set<String> {
+        var ids = selection.staged
+        if hasStagedIcons { ids.insert("custom-icons") }
+        return ids
+    }
+
     private var canStart: Bool {
-        status.unlocked && !selection.staged.isEmpty && findMyOff
+        status.unlocked && !effectiveStaged.isEmpty && findMyOff
             && (!needsRiskAcceptance || riskAccepted)
     }
 
@@ -248,7 +267,7 @@ struct ApplyView: View {
         logLines = ["[WorkSlop] Apply started — iOS \(DeviceInfoEx.fullVersion) (\(DeviceInfoEx.buildNumber))"]
         let request = RestoreRequest(
             deviceVersion: version,
-            stagedFeatureIDs: selection.staged,
+            stagedFeatureIDs: effectiveStaged,
             findMyDisabledAttested: findMyOff,
             deviceLabel: "device",
             backupPassword: backupPassword.isEmpty ? nil : backupPassword,

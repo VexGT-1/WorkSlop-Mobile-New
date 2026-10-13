@@ -70,7 +70,9 @@ struct TweakGroup: Identifiable, Hashable {
 /// The tweak options of one group: plain toggles, never sliders.
 struct TweakListView: View {
     let group: TweakGroup
-    @StateObject private var iconStage = IconStage()
+    // Shared app-wide stage (owned by ContentView): icons staged here
+    // are visible to ApplyView's gate, so icons alone enable Apply.
+    @EnvironmentObject private var iconStage: IconStage
 
     var body: some View {
         ZStack {
@@ -104,7 +106,6 @@ struct TweakListView: View {
         }
         .navigationTitle(group.id)
         .navigationBarTitleDisplayMode(.inline)
-        .environmentObject(iconStage)
     }
 
     // MARK: - Custom Icons (Your Icons + iOS 18 galleries)

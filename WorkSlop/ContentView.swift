@@ -7,6 +7,11 @@ struct ContentView: View {
     @StateObject private var selection = SelectionStore()
     @StateObject private var status = StatusStore()
     @StateObject private var updater = UpdateChecker()
+    // Single app-wide owner of the staged custom icons: ApplyView needs
+    // to count them toward the apply gate (icons alone must be enough
+    // to enable Apply), so the stage lives at the root, not inside the
+    // tweak list.
+    @StateObject private var iconStage = IconStage()
 
     init(demoScreen: String? = nil) {
         self.demoScreen = demoScreen
@@ -16,6 +21,7 @@ struct ContentView: View {
         MainMenuView(demoScreen: demoScreen)
             .environmentObject(selection)
             .environmentObject(status)
+            .environmentObject(iconStage)
             .task {
                 await updater.check()
             }

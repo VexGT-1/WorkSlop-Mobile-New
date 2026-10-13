@@ -286,13 +286,29 @@ struct MainMenuView: View {
         .background(cardBackground)
     }
 
-    /// Liquid-Glass style card: ultra-thin material gives the
-    /// transparent blur over the animated sky instead of flat white.
-    /// (Material ShapeStyle is iOS 15+, safe for the iOS 16 target.)
+    /// Blue-tinted reflective glass card: ultra-thin material keeps the
+    /// blur over the animated sky, a translucent blue wash pulls it into
+    /// the WorkSlop blue UI family, and a white top sheen gives the
+    /// glass reflection. Kept light (never opaque) so text stays
+    /// readable. (All ShapeStyles are iOS 15/16-safe.)
     private var cardBackground: some View {
         RoundedRectangle(cornerRadius: 16, style: .continuous)
             .fill(.ultraThinMaterial)
-            .shadow(color: .black.opacity(0.06), radius: 6, y: 2)
+            .overlay(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                .white.opacity(0.32),
+                                .blue.opacity(0.08),
+                                .blue.opacity(0.22),
+                            ],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                    )
+            )
+            .shadow(color: .blue.opacity(0.14), radius: 8, y: 3)
     }
 
     // MARK: - Pairing import

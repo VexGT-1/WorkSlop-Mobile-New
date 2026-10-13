@@ -52,8 +52,14 @@ enum LockdownProbe {
                                               : socklen_t(MemoryLayout<sockaddr_in6>.size)
             if getnameinfo(sa, len, &host, socklen_t(host.count), nil, 0, NI_NUMERICHOST) == 0 {
                 let addr = String(cString: host)
-                // Loopback (v4 + v6) and link-local are never a VPN tunnel.
-                if addr != "127.0.0.1" && addr != "::1" && !addr.hasPrefix("fe80") && !addr.hasPrefix("FE80") && !out.contains(addr) {
+                // Link-local (fe80::/10) is never a usable tunnel by itself:
+                // idle system utun interfaces carry only auto-assigned
+                // link-local. Loopback (127.0.0.1/::1) IS accepted here:
+                // it must sit on a utun interface to reach this point
+                // (lo0 can't), which means a deliberate loopback tunnel —
+                // the same rule DeviceStatus.vpnTunnelActive() uses, so the
+                // probe and the VPN tunnel row never disagree.
+                if !addr.hasPrefix("fe80") && !addr.hasPrefix("FE80") && !out.contains(addr) {
                     out.append(addr)
                 }
             }

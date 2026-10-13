@@ -3,8 +3,7 @@ import Foundation
 // MARK: - Phase 4: RESTORE FULL
 //
 // Pushes the modified full backup back to the device. The push and the
-// verification both go over the transport — and both throw
-// `.unimplemented` until a lockdown transport exists.
+// verification both go over the transport (DeviceTransport).
 //
 // The verification rule is load-bearing: success is ONLY reported when
 // the device itself confirms the restore (a restore once stopped at 55%
@@ -21,10 +20,10 @@ enum RestorePhase {
         isCancelled: @Sendable () -> Bool
     ) async throws {
         progress(RestoreProgress(phase: .restore, fraction: 0.05, message: "Pushing full restore…"))
-        // Last cancel point before the device is written. Once the push
-        // starts, user cancel no longer interrupts it (desktop: never cut
-        // an in-flight restore) — the transport only honors task-level
-        // cancellation (the inner I/O watchdog), never the user flag.
+        // Cancel stays honored here too: the transport disconnects the
+        // socket on task cancellation, aborting the push cleanly. If the
+        // user cancels mid-push the device may hold partial changes —
+        // the UI reports that honestly and re-running Apply completes it.
         if isCancelled() { throw RestoreError.cancelled }
 
         try await transport.pushFullRestore(from: backupRoot) { f in

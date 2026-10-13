@@ -93,11 +93,52 @@ actor LoopbackTransport: DeviceTransport {
             lockdown.close()
             throw error
         }
-        let udid = (try? await lockdown.getValue(domain: nil, key: "UniqueDeviceID") as? String) ?? "device"
+        // Never guessed: a literal fallback here would run the
+        // backup/restore exchanges against targetID "device" — a
+        // wrong-identity run that fails confusingly downstream.
+        // Refuse loudly at the source instead.
+        guard let udid = try? await lockdown.getValue(domain: nil, key: "UniqueDeviceID") as? String,
+              !udid.isEmpty
+        else {
+            lockdown.close()
+            throw RestoreError.phaseFailed(
+                phase: .backup,
+                message: "Device did not report a UDID — refusing to guess one for the backup/restore exchange.")
+        }
         return (lockdown, identity, udid)
     }
 
     // MARK: - DeviceTransport
+
+    /// Runs one mobilebackup2 exchange with REAL user cancellation:
+    /// - the client's cooperative checks follow Task.isCancelled
+    /// - on task cancellation the socket is disconnected, which unblocks
+    ///   any hung read immediately — nothing keeps running in the
+    ///   background after cancel (this is the fix for "cancel only hides
+    ///   the UI while the run continues")
+    /// - any error raised while the task is cancelled is reported as
+    ///   .cancelled, not as a transport failure (the socket error from
+    ///   the disconnect is the mechanism, not the cause)
+    private func cancellableExchange<T: Sendable>(
+        _ mb2: MobileBackup2Client,
+        _ body: @Sendable () async throws -> T
+    ) async throws -> T {
+        await mb2.setCancelled { Task.isCancelled }
+        do {
+            return try await withTaskCancellationHandler(operation: body) {
+                // Unblock hung reads: NWConnection.cancel() fires the
+                // pending receive completion with an error.
+                Task { await mb2.disconnect() }
+            }
+        } catch {
+            await mb2.disconnect()
+            if Task.isCancelled { throw RestoreError.cancelled }
+            if let mb2err = error as? MobileBackup2Error, case .cancelled = mb2err {
+                throw RestoreError.cancelled
+            }
+            throw error
+        }
+    }
 
     func pullFullBackup(to stagingDir: URL,
                         progress: @Sendable @escaping (Double) -> Void) async throws -> URL {
@@ -115,23 +156,23 @@ actor LoopbackTransport: DeviceTransport {
         }
 
         let mb2 = MobileBackup2Client(port: port)
-        // Task-level cancellation only (the inner I/O watchdog's path).
-        // The user cancel flag is deliberately NOT wired in: cancel is
-        // honored between phases, never mid-transfer (desktop: never cut
-        // an in-flight backup/restore).
-        await mb2.setCancelled { Task.isCancelled }
+        // Hoisted for the @Sendable closures below (actor-isolated
+        // state cannot be captured by them under Swift 6).
+        let password = backupPassword
         do {
             _ = try await mb2.connect()
             // Inner I/O watchdog (desktop: run_with_stall_watchdog, 300s):
             // a wedged device aborts here instead of hanging forever.
-            let count = try await withIOWatchdog(
-                phase: .backup, operation: "backup",
-                onStall: { await mb2.disconnect() }
-            ) { tick in
-                try await mb2.runBackup(
-                    targetID: udid, sourceID: udid, password: self.backupPassword,
-                    to: stagingDir,
-                    progress: { f, _ in tick(); if f >= 0 { progress(f) } })
+            let count = try await cancellableExchange(mb2) {
+                try await withIOWatchdog(
+                    phase: .backup, operation: "backup",
+                    onStall: { await mb2.disconnect() }
+                ) { tick in
+                    try await mb2.runBackup(
+                        targetID: udid, sourceID: udid, password: password,
+                        to: stagingDir,
+                        progress: { f, _ in tick(); if f >= 0 { progress(f) } })
+                }
             }
             // A pulled backup that yielded zero files is not a backup.
             guard count > 0 else {
@@ -142,6 +183,7 @@ actor LoopbackTransport: DeviceTransport {
             return stagingDir
         } catch {
             await mb2.disconnect()
+            if Task.isCancelled { throw RestoreError.cancelled }
             throw error
         }
     }
@@ -163,35 +205,37 @@ actor LoopbackTransport: DeviceTransport {
         }
 
         let mb2 = MobileBackup2Client(port: port)
-        // See pullFullBackup: task-level cancellation only; user cancel
-        // never interrupts an in-flight restore.
-        await mb2.setCancelled { Task.isCancelled }
+        // Hoisted for the @Sendable closures below.
+        let password = backupPassword
+        let root = backupRoot
         do {
             _ = try await mb2.connect()
 
-            let confirmed = try await withIOWatchdog(
-                phase: .restore, operation: "restore",
-                onStall: { await mb2.disconnect() }
-            ) { tick in
-                try await mb2.runRestore(
-                    targetID: udid, sourceID: udid, password: self.backupPassword,
-                    from: backupRoot,
-                    fileResolver: { [backupRoot] path in
-                        let direct = backupRoot.appendingPathComponent(path)
-                        if FileManager.default.fileExists(atPath: direct.path) { return direct }
-                        // Injected payloads live at <aa>/<fileID> (Apple
-                        // layout, written by ModifyPhase); the device may
-                        // request the bare fileID.
-                        if path.count == 40,
-                           path.allSatisfy({ $0.isHexDigit }) {
-                            let aa = backupRoot
-                                .appendingPathComponent(String(path.prefix(2)))
-                                .appendingPathComponent(path)
-                            if FileManager.default.fileExists(atPath: aa.path) { return aa }
-                        }
-                        return nil
-                    },
-                    progress: { f, _ in tick(); if f >= 0 { progress(f) } })
+            let confirmed = try await cancellableExchange(mb2) {
+                try await withIOWatchdog(
+                    phase: .restore, operation: "restore",
+                    onStall: { await mb2.disconnect() }
+                ) { tick in
+                    try await mb2.runRestore(
+                        targetID: udid, sourceID: udid, password: password,
+                        from: root,
+                        fileResolver: { [root] path in
+                            let direct = root.appendingPathComponent(path)
+                            if FileManager.default.fileExists(atPath: direct.path) { return direct }
+                            // Injected payloads live at <aa>/<fileID> (Apple
+                            // layout, written by ModifyPhase); the device may
+                            // request the bare fileID.
+                            if path.count == 40,
+                               path.allSatisfy({ $0.isHexDigit }) {
+                                let aa = root
+                                    .appendingPathComponent(String(path.prefix(2)))
+                                    .appendingPathComponent(path)
+                                if FileManager.default.fileExists(atPath: aa.path) { return aa }
+                            }
+                            return nil
+                        },
+                        progress: { f, _ in tick(); if f >= 0 { progress(f) } })
+                }
             }
 
             lastRestoreDeviceConfirmed = confirmed
@@ -204,6 +248,7 @@ actor LoopbackTransport: DeviceTransport {
             await mb2.disconnect()
         } catch {
             await mb2.disconnect()
+            if Task.isCancelled { throw RestoreError.cancelled }
             throw error
         }
     }
@@ -254,22 +299,26 @@ actor LoopbackTransport: DeviceTransport {
         }
 
         let mb2 = MobileBackup2Client(port: port)
-        // Cooperative cancel lives BETWEEN phases: a restore exchange
-        // already in flight is never cut (cutting it mid-write is worse
-        // than letting it land).
-        await mb2.setCancelled { false }
+        // Real user cancel, same as the full route. Cutting a PARTIAL
+        // restore mid-write is safe: no wipe is involved, files land
+        // individually, and re-running Apply re-sends everything —
+        // an interrupted run is completed, not bricked.
+        let password = backupPassword
+        let root = backupRoot
         do {
             _ = try await mb2.connect()
             // Inner I/O watchdog, same as the full route: a wedged
             // device aborts instead of hanging forever.
-            let (confirmed, served) = try await withIOWatchdog(
-                phase: .restore, operation: "partial restore",
-                onStall: { await mb2.disconnect() }
-            ) { tick in
-                try await mb2.runPartialRestore(
-                    targetID: udid, sourceID: udid, password: self.backupPassword,
-                    from: backupRoot,
-                    progress: { f, _ in tick(); if f >= 0 { progress(f) } })
+            let (confirmed, served) = try await cancellableExchange(mb2) {
+                try await withIOWatchdog(
+                    phase: .restore, operation: "partial restore",
+                    onStall: { await mb2.disconnect() }
+                ) { tick in
+                    try await mb2.runPartialRestore(
+                        targetID: udid, sourceID: udid, password: password,
+                        from: root,
+                        progress: { f, _ in tick(); if f >= 0 { progress(f) } })
+                }
             }
 
             lastRestoreDeviceConfirmed = confirmed
@@ -281,6 +330,7 @@ actor LoopbackTransport: DeviceTransport {
             return served
         } catch {
             await mb2.disconnect()
+            if Task.isCancelled { throw RestoreError.cancelled }
             throw error
         }
     }

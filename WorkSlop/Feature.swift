@@ -352,15 +352,6 @@ enum FeatureCatalog {
                 subtitle: "SolariumIncreasedDiffusion", section: "Liquid Glass",
                 route: .partialRestore, window: ios26xOnly),
 
-        // --- Status Bar (desktop Status Bar page) ---
-        Feature(
-            id: "status-bar",
-            title: "Status Bar Overrides",
-            subtitle: "Carrier text, icons & overrides (iOS 26.x only — classic binary is dead on iOS 27)",
-            section: "Status Bar",
-            route: .partialRestore,
-            window: ios26xOnly),
-
         // --- SpringBoard (desktop SpringBoard section) ---
         Feature(id: "sb-watchos-pairing", title: "Allow pairing with any watchOS version",
                 subtitle: "NanoRegistry pairing flag (no plist key)", section: "SpringBoard",
@@ -386,10 +377,6 @@ enum FeatureCatalog {
         Feature(id: "sb-icon-parallax", title: "Disable Icon Parallax",
                 subtitle: "SBDisableParallax", section: "SpringBoard",
                 route: .partialRestore, window: ios16to26),
-        Feature(id: "sb-hide-search", title: "Hide Search Button on Home Screen",
-                subtitle: "SBHomeScreenShowsSearchAffordance = false", section: "SpringBoard",
-                route: .partialRestore, window: ios16to26),
-
         // --- Daemons (disabled.plist, partial restore) ---
         Feature(id: "dm-recommended",
                 title: "Recommended (analytics, tracking & logging)",
@@ -411,13 +398,11 @@ enum FeatureCatalog {
         Feature(id: "dm-airprint", title: "Disable AirPrint", subtitle: "com.apple.printd", section: "Daemons", route: .partialRestore, window: ios16to26),
         Feature(id: "dm-assistivetouch", title: "Disable Assistive Touch", subtitle: "com.apple.assistivetouchd", section: "Daemons", route: .partialRestore, window: ios16to26),
         Feature(id: "dm-icloud", title: "Disable iCloud", subtitle: "com.apple.itunescloudd", section: "Daemons", route: .partialRestore, window: ios16to26),
-        Feature(id: "dm-internettethering", title: "Disable Internet Tethering (Hotspot)", subtitle: "com.apple.MobileInternetSharing", section: "Daemons", route: .partialRestore, window: ios16to26),
         Feature(id: "dm-passbook", title: "Disable Passbook", subtitle: "com.apple.passd", section: "Daemons", route: .partialRestore, window: ios16to26),
         Feature(id: "dm-spotlight", title: "Disable Spotlight", subtitle: "com.apple.searchd + 4 more", section: "Daemons", route: .partialRestore, window: ios16to26),
         Feature(id: "dm-nanotimekit", title: "Disable NanoTimeKit (Apple Watch Face Sync)", subtitle: "com.apple.nanotimekitcompaniond", section: "Daemons", route: .partialRestore, window: ios16to26),
         Feature(id: "dm-voicecontrol", title: "Disable Voice Control", subtitle: "com.apple.assistant_service + 2 more", section: "Daemons", route: .partialRestore, window: ios16to26),
         Feature(id: "dm-followup", title: "Follow Up", subtitle: "com.apple.followupd", section: "Daemons", route: .partialRestore, window: ios16to26),
-        Feature(id: "dm-location", title: "Location Services", subtitle: "com.apple.locationd", section: "Daemons", route: .partialRestore, window: ios16to26),
         Feature(id: "dm-wifianalytics", title: "Disable Wi-Fi Analytics", subtitle: "com.apple.wifianalyticsd", section: "Daemons", route: .partialRestore, window: ios16to26),
         Feature(id: "dm-analyticshelper", title: "Disable System Analytics", subtitle: "com.apple.analyticsd + 2 more", section: "Daemons", route: .partialRestore, window: ios16to26),
         Feature(id: "dm-callanalytics", title: "Disable Call Analytics (RTC Reporting)", subtitle: "com.apple.rtcreportingd", section: "Daemons", route: .partialRestore, window: ios16to26),
@@ -450,15 +435,9 @@ enum FeatureCatalog {
         Feature(id: "in-hidden-icons", title: "Show Hidden Icons on Home Screen",
                 subtitle: "SBIconVisibility", section: "Internal Options",
                 route: .partialRestore, window: ios16to26),
-        Feature(id: "in-key-flicks", title: "Keyboard Key Flicks",
-                subtitle: "GesturesEnabled", section: "Internal Options",
-                route: .partialRestore, window: ios16to26),
 
         // --- PosterBoard (desktop PosterBoard page) ---
         Feature(id: "pb-tendies", title: "Tendies wallpapers (.tendies)", subtitle: "AppDomain-com.apple.PosterBoard / PRBPosterExtensionDataStore (max 5 files per restore, 10 descriptors)", section: "PosterBoard", route: .partialRestore, window: ios16to26),
-        Feature(id: "pb-templates", title: "Templates (.batter)", subtitle: "AppDomain-com.apple.PosterBoard / PRBPosterExtensionDataStore", section: "PosterBoard", route: .partialRestore, window: ios16to26),
-        Feature(id: "pb-video-freeze", title: "Video wallpaper (freeze frame)", subtitle: "Freeze-frame video tendies: a still frame becomes a live-photo style wallpaper (desktop builds it with a thumbnail).", section: "PosterBoard", route: .partialRestore, window: ios16to26),
-        Feature(id: "pb-video-loop", title: "Video wallpaper (loop)", subtitle: "Looped video tendies via CAML (Calculation Mode: Linear / Discrete).", section: "PosterBoard", route: .partialRestore, window: ios16to26),
         Feature(id: "pb-reset", title: "Reset PosterBoard", subtitle: "Clears delivered descriptors; PosterBoard rebuilds itself", section: "PosterBoard", route: .partialRestore, window: ios16to26),
 
         // --- Custom Icons (desktop Custom Icons page) ---

@@ -442,9 +442,14 @@ final actor MobileBackup2Client {
         // No RestoreShouldReboot: the engine reboots explicitly exactly
         // once after the restore (desktop: reboot=False). Letting the
         // device auto-reboot AND rebooting again was a double reboot.
+        // RestoreSystemFiles + DontCopyBackup=false mirror the desktop's
+        // protective restore (mb.restore(..., system=True, copy=True)):
+        // the device copies the backup locally, then restores system
+        // files from that copy.
         var options: [String: Any] = [
-            "RestoreDontCopyBackup": true,
+            "RestoreDontCopyBackup": false,
             "RestorePreserveSettings": true,
+            "RestoreSystemFiles": true,
             "RemoveItemsNotRestored": false,
         ]
         if let password = password { options["Password"] = password }
@@ -518,7 +523,10 @@ final actor MobileBackup2Client {
     {
         var options: [String: Any] = [
             "RestoreShouldReboot": false,
-            "RestoreDontCopyBackup": false,
+            // Desktop sparse restore parity (perform_restore: copy=False
+            // → RestoreDontCopyBackup=True): the device streams payloads
+            // on demand instead of copying the synthetic backup locally.
+            "RestoreDontCopyBackup": true,
             "RestorePreserveSettings": true,
             "RestoreSystemFiles": true,
             "RemoveItemsNotRestored": false,
@@ -576,11 +584,12 @@ final actor MobileBackup2Client {
     }
 
     /// Answers DLContentsOfDirectory (idevicebackup2.c
-    /// mb2_handle_list_directory): status 0 +
+    /// mb2_handle_list_directory reads full-array index 1; receiveDL
+    /// strips the message name, so the path is items[0] here): status 0 +
     /// { name: { DLFileType, DLFileSize, DLFileModificationDate } }.
     private func handleListDirectory(_ items: [Any], base: URL) async throws {
         var listing: [String: Any] = [:]
-        if items.count > 1, let rel = items[1] as? String {
+        if let rel = items.first as? String {
             let dirURL = base.appendingPathComponent(rel)
             if let names = try? FileManager.default.contentsOfDirectory(atPath: dirURL.path) {
                 for name in names {

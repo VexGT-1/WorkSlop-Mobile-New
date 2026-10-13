@@ -147,18 +147,28 @@ enum PayloadBuilder {
                     fromPropertyList: plist, format: .xml, options: 0) {
                     let url = dir.appendingPathComponent(
                         folder.replacingOccurrences(of: "/", with: "_") + "_Info.plist")
-                    try? plistData.write(to: url, options: .atomic)
-                    files.append(BuiltFile(
-                        domain: "HomeDomain", restorePath: folder + "/Info.plist",
-                        keys: Array(plist.keys).sorted(), url: url))
+                    do {
+                        try plistData.write(to: url, options: .atomic)
+                        files.append(BuiltFile(
+                            domain: "HomeDomain", restorePath: folder + "/Info.plist",
+                            keys: Array(plist.keys).sorted(), url: url))
+                    } catch {
+                        warnings.append("custom-icons: could not stage Info.plist for \(entry.bundleID) (\(error.localizedDescription)).")
+                    }
+                } else {
+                    warnings.append("custom-icons: could not serialize Info.plist for \(entry.bundleID) - skipped.")
                 }
                 if let png = entry.imageData {
                     let url = dir.appendingPathComponent(
                         folder.replacingOccurrences(of: "/", with: "_") + "_icon.png")
-                    try? png.write(to: url, options: .atomic)
-                    files.append(BuiltFile(
-                        domain: "HomeDomain", restorePath: folder + "/icon.png",
-                        keys: ["icon.png (\(png.count) bytes)"], url: url))
+                    do {
+                        try png.write(to: url, options: .atomic)
+                        files.append(BuiltFile(
+                            domain: "HomeDomain", restorePath: folder + "/icon.png",
+                            keys: ["icon.png (\(png.count) bytes)"], url: url))
+                    } catch {
+                        warnings.append("custom-icons: could not stage icon.png for \(entry.bundleID) (\(error.localizedDescription)).")
+                    }
                 } else {
                     warnings.append("custom-icons: skipped icon file for \(entry.bundleID) (no icon data) - Info.plist still staged, like desktop.")
                 }
@@ -183,12 +193,25 @@ enum PayloadBuilder {
                 if zips.count > PosterBoardExtractor.maxTendiesPerRestore {
                     warnings.append("pb-tendies: \(zips.count) files imported, only the first \(PosterBoardExtractor.maxTendiesPerRestore) are delivered per restore (desktop cap).")
                 }
+                // Honest grade: this delivers via the legacy *descriptors*
+                // route that upstream GoldenNugget dropped (desktop now uses
+                // configurations + PosterBoard DB registration). Delivered
+                // wallpapers may be ignored by PosterBoard even after the
+                // force-refresh below.
+                warnings.append("pb-tendies: delivered to .../Extensions/<ext>/descriptors (legacy route, dropped upstream) - wallpapers may not appear without configurations + DB registration.")
+                var descriptorTotal = 0
+                let maxDescriptorsTotal = 10 // desktop verify_tendie cap
                 for zip in zips.prefix(PosterBoardExtractor.maxTendiesPerRestore) {
-                    let (extracted, extractWarnings) = PosterBoardExtractor.extract(
+                    let (extracted, extractWarnings, descriptorCount) = PosterBoardExtractor.extract(
                         tendiesURL: zip,
                         structureVersion: PayloadSpecCatalog.pbStructure,
                         stagingDir: dir)
                     warnings.append(contentsOf: extractWarnings)
+                    if descriptorTotal + descriptorCount > maxDescriptorsTotal {
+                        warnings.append("pb-tendies: \(zip.lastPathComponent) would exceed \(maxDescriptorsTotal) descriptors in total - skipped (desktop verify_tendie cap).")
+                        continue
+                    }
+                    descriptorTotal += descriptorCount
                     for e in extracted {
                         files.append(BuiltFile(
                             domain: PosterBoardExtractor.domain,
@@ -196,6 +219,19 @@ enum PayloadBuilder {
                             keys: ["\(e.localURL.lastPathComponent)"],
                             url: e.localURL))
                     }
+                }
+                // PosterBoard force-refresh (desktop posterboard_tweak.py
+                // force_pb_refresh): without this plist PosterBoard never
+                // re-scans descriptors, so delivered wallpapers are ignored
+                // even after reboot. Trigger is a normal reboot, NOT respring.
+                if let refresh = PosterBoardExtractor.forceRefreshFile(stagingDir: dir) {
+                    files.append(BuiltFile(
+                        domain: PosterBoardExtractor.domain,
+                        restorePath: refresh.restorePath,
+                        keys: ["com.apple.PosterBoard.unprotectedUserDefaults.plist (PBF_RESET_FILE_PROTECTIONS)"],
+                        url: refresh.localURL))
+                } else {
+                    warnings.append("pb-tendies: could not stage PosterBoard force-refresh plist - wallpapers may not appear until manual re-apply.")
                 }
             }
         }
@@ -208,10 +244,14 @@ enum PayloadBuilder {
             for write in resetSpec.writes {
                 let url = dir.appendingPathComponent(
                     write.restorePath.replacingOccurrences(of: "/", with: "_") + ".empty")
-                try? Data().write(to: url, options: .atomic)
-                files.append(BuiltFile(
-                    domain: write.domain.rawValue, restorePath: write.restorePath,
-                    keys: ["<empty file, 0 bytes>"], url: url))
+                do {
+                    try Data().write(to: url, options: .atomic)
+                    files.append(BuiltFile(
+                        domain: write.domain.rawValue, restorePath: write.restorePath,
+                        keys: ["<empty file, 0 bytes>"], url: url))
+                } catch {
+                    warnings.append("pb-reset: could not stage empty file for \(write.restorePath) (\(error.localizedDescription)).")
+                }
             }
         }
 
@@ -224,10 +264,14 @@ enum PayloadBuilder {
             for write in stSpec.writes {
                 let url = dir.appendingPathComponent(
                     write.restorePath.replacingOccurrences(of: "/", with: "_") + ".empty")
-                try? Data().write(to: url, options: .atomic)
-                files.append(BuiltFile(
-                    domain: write.domain.rawValue, restorePath: write.restorePath,
-                    keys: ["<empty file, 0 bytes>"], url: url))
+                do {
+                    try Data().write(to: url, options: .atomic)
+                    files.append(BuiltFile(
+                        domain: write.domain.rawValue, restorePath: write.restorePath,
+                        keys: ["<empty file, 0 bytes>"], url: url))
+                } catch {
+                    warnings.append("dm-clear-screentime: could not stage empty file for \(write.restorePath) (\(error.localizedDescription)).")
+                }
             }
         }
 

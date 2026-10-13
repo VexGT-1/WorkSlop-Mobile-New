@@ -4,8 +4,7 @@ import Foundation
 //
 // Real work done here: prerequisite gates (pairing, tunnel, disk, Find My
 // attestation, version) and backup staging preparation. The actual
-// mobilebackup2 pull needs the loopback transport and throws
-// `.unimplemented` there — loudly, with the missing piece named.
+// mobilebackup2 pull goes over the loopback transport (DeviceTransport).
 
 enum BackupPhase {
     struct Result: Sendable {

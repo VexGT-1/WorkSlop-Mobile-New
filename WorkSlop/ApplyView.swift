@@ -8,7 +8,13 @@ import SwiftUI
 ///
 /// Nothing here is a preview: progress comes from the engine's
 /// RestoreProgress ticks, and success is only reported when the
-/// device confirms. A running restore cannot be cancelled mid-flight.
+/// device confirms.
+///
+/// Cancel is REAL, not UI-only: the Cancel button cancels the Swift
+/// Task running the engine AND sets the engine's cancel flag. The
+/// transport disconnects the device socket on cancellation, unblocking
+/// hung reads — after cancel, no background work survives (this is the
+/// fix for runs that kept going after the user asked them to stop).
 struct ApplyView: View {
     @EnvironmentObject private var status: StatusStore
     @EnvironmentObject private var selection: SelectionStore
@@ -17,14 +23,23 @@ struct ApplyView: View {
     @State private var riskAccepted = false
     @State private var backupPassword = ""
     @State private var running = false
+    @State private var cancelling = false
     @State private var progress: RestoreProgress?
     @State private var logLines: [String] = []
+    @State private var lastLoggedPercent = -1
     @State private var result: ApplyResult?
     @State private var showRestartSheet = false
+    /// The live run's task — stored so Cancel can REALLY stop it.
+    @State private var applyTask: Task<Void, Never>?
 
     private enum ApplyResult {
         case succeeded
         case failed(String)
+        /// Cancelled before the device was written: nothing changed.
+        case cancelled(phaseName: String)
+        /// Cancelled while the restore push was in flight: the device
+        /// may hold partial changes — re-running Apply completes them.
+        case cancelledDuringRestore(phaseName: String)
     }
 
     /// The iOS 27 full method needs the explicit bootloop-risk acceptance;
@@ -59,19 +74,21 @@ struct ApplyView: View {
             }
 
             if running, let progress {
-                Section("Running") {
+                Section(cancelling ? "Cancelling…" : "Running") {
                     VStack(alignment: .leading, spacing: 8) {
                         HStack {
                             Text("\(Int(progress.fraction * 100))%")
                                 .font(.title2.weight(.bold))
                                 .monospacedDigit()
                             Spacer()
-                            Text(progress.phase.displayName)
+                            Text(cancelling ? "Stopping…" : progress.phase.displayName)
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
                         ProgressView(value: progress.fraction)
-                        Text(progress.message)
+                        Text(cancelling
+                             ? "Cancel requested — closing device connections…"
+                             : progress.message)
                             .font(.subheadline)
                     }
                     .padding(.vertical, 4)
@@ -115,6 +132,18 @@ struct ApplyView: View {
                         Text(message)
                             .font(.footnote)
                             .foregroundStyle(.secondary)
+                    case .cancelled(let phaseName):
+                        Label("Cancelled", systemImage: "stop.circle")
+                            .foregroundStyle(Color.orange)
+                        Text("Stopped during \(phaseName) before anything was written to the device. All connections are closed — nothing is running in the background.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    case .cancelledDuringRestore(let phaseName):
+                        Label("Cancelled during restore", systemImage: "exclamationmark.triangle")
+                            .foregroundStyle(Color.orange)
+                        Text("Stopped during \(phaseName). The device may hold partial changes — re-run Apply to complete them. All connections are closed — nothing is running in the background.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
                     }
                 }
             }
@@ -129,14 +158,15 @@ struct ApplyView: View {
                 .accessibilityIdentifier("apply-now")
 
                 if running {
-                    Button("Cancel (between phases only)", role: .destructive) {
-                        Task { await RestoreEngine.shared.cancel() }
+                    Button(cancelling ? "Cancelling…" : "Cancel", role: .destructive) {
+                        cancelApply()
                     }
                     .frame(maxWidth: .infinity)
+                    .disabled(cancelling)
                     .accessibilityIdentifier("apply-cancel")
                 }
             } footer: {
-                Text("A restore already in flight is never interrupted - cancel only takes effect between phases.")
+                Text("Cancel stops the run for real: the task is cancelled, device connections are closed, and no background work continues. If cancelled during Restore, re-run Apply to complete the changes.")
             }
         }
         .navigationTitle("Apply")
@@ -211,8 +241,10 @@ struct ApplyView: View {
             return
         }
         running = true
+        cancelling = false
         result = nil
         progress = nil
+        lastLoggedPercent = -1
         logLines = ["[WorkSlop] Apply started — iOS \(DeviceInfoEx.fullVersion) (\(DeviceInfoEx.buildNumber))"]
         let request = RestoreRequest(
             deviceVersion: version,
@@ -223,7 +255,11 @@ struct ApplyView: View {
             deviceBuild: DeviceInfoEx.buildNumber,
             riskWarningAccepted: riskAccepted
         )
-        Task {
+        // The task handle is stored so Cancel can REALLY stop it:
+        // applyTask.cancel() trips Task.isCancelled inside every phase
+        // and transport loop, and the transport disconnects the device
+        // socket on cancellation. Nothing survives in the background.
+        applyTask = Task {
             do {
                 // The engine's progress closure is @Sendable; marking ours
                 // @MainActor makes it Sendable (global-actor-isolated
@@ -234,22 +270,71 @@ struct ApplyView: View {
                     onProgress: { @MainActor p in
                         self.progress = p
                         let pct = Int(p.fraction * 100)
-                        self.logLines.append("[\(pct)%] [\(p.phase.displayName)] \(p.message)")
+                        // Throttle the log: one line per percent point, not
+                        // per tick — a full backup emits thousands of ticks
+                        // and the log must not grow without bound.
+                        if pct != self.lastLoggedPercent {
+                            self.lastLoggedPercent = pct
+                            self.logLines.append("[\(pct)%] [\(p.phase.displayName)] \(p.message)")
+                        }
                     }
                 )
                 await MainActor.run {
+                    self.applyTask = nil
                     self.running = false
+                    self.cancelling = false
                     self.logLines.append("[100%] Done — all phases confirmed by the device.")
                     self.result = .succeeded
                     self.showRestartSheet = true
                 }
+            } catch is CancellationError {
+                await MainActor.run { self.finishCancelled() }
+            } catch let error as RestoreError {
+                await MainActor.run {
+                    if case .cancelled = error {
+                        self.finishCancelled()
+                    } else {
+                        self.applyTask = nil
+                        self.running = false
+                        self.cancelling = false
+                        self.result = .failed(error.localizedDescription)
+                    }
+                }
             } catch {
                 let message = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
                 await MainActor.run {
+                    self.applyTask = nil
                     self.running = false
+                    self.cancelling = false
                     self.result = .failed(message)
                 }
             }
         }
+    }
+
+    /// REAL cancel — not UI-only. Cancels the Swift Task (trips
+    /// Task.isCancelled in every phase and transport loop, and the
+    /// transport disconnects the device socket so hung reads unblock)
+    /// and sets the engine's cancel flag as a backstop. The run stops;
+    /// nothing keeps going in the background.
+    private func cancelApply() {
+        guard running, !cancelling else { return }
+        cancelling = true
+        logLines.append("[WorkSlop] Cancel requested — stopping the run and closing device connections…")
+        applyTask?.cancel()
+        Task { await RestoreEngine.shared.cancel() }
+    }
+
+    /// Honest cancel report: names the phase that was active and whether
+    /// the device may have been written, so the user knows exactly what
+    /// to do next.
+    private func finishCancelled() {
+        let phaseName = progress?.phase.displayName ?? "startup"
+        let wasRestore = progress?.phase == .restore
+        applyTask = nil
+        running = false
+        cancelling = false
+        logLines.append("[WorkSlop] Cancelled during \(phaseName) — all connections closed, no background work remains.")
+        result = wasRestore ? .cancelledDuringRestore(phaseName) : .cancelled(phaseName)
     }
 }

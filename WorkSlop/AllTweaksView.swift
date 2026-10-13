@@ -6,8 +6,6 @@ struct AllTweaksView: View {
     private let groups: [TweakGroup] = [
         TweakGroup(id: "Liquid Glass", icon: "sparkles",
                    footer: "Partial restore on iOS 26, Full backup → modify → restore on iOS 27 - the same split as desktop."),
-        TweakGroup(id: "Status Bar", icon: "antenna.radiowaves.left.and.right",
-                   footer: "Target: Library/SpringBoard/statusBarOverrides - a fixed 3,944-byte struct, not a plist (firmware-audited on iOS 26.6.1). The full-bars look without a SIM is visual only; it does not restore cellular service."),
         TweakGroup(id: "SpringBoard", icon: "square.grid.2x2", footer: nil),
         TweakGroup(id: "Daemons", icon: "gearshape.2",
                    footer: "Daemon toggles stage the same disabled-daemons list the desktop manages."),
@@ -85,18 +83,6 @@ struct TweakListView: View {
                         ForEach(FeatureCatalog.features(in: group.catalogSection)) { feature in
                             FeatureToggleRow(feature: feature)
                         }
-                        if group.id == "Status Bar" {
-                            NavigationLink {
-                                StatusBarDetailView()
-                            } label: {
-                                Label {
-                                    Text("Status Bar details")
-                                } icon: {
-                                    RowIcon(name: "antenna.radiowaves.left.and.right")
-                                }
-                            }
-                            .accessibilityIdentifier("nav-statusbar-details")
-                        }
                         if group.id == "PosterBoard" {
                             NavigationLink {
                                 PosterBoardFilesView()
@@ -127,7 +113,7 @@ struct TweakListView: View {
         Group {
             YourIconsSection()
             Section {
-                ForEach(IOS18IconCatalog.all) { icon in
+                ForEach(IOS18IconCatalog.lightIcons) { icon in
                     GalleryRow(icon: icon, variant: .light)
                 }
             } header: {

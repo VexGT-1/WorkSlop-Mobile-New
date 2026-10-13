@@ -107,6 +107,10 @@ enum IOS18IconCatalog {
         return img
     }
 
+    static func hasLight(slug: String) -> Bool {
+        Bundle.main.url(forResource: slug, withExtension: "png", subdirectory: "iOS18Icons/Light") != nil
+    }
+
     static func hasDark(slug: String) -> Bool {
         Bundle.main.url(forResource: slug, withExtension: "png", subdirectory: "iOS18Icons/Dark") != nil
     }
@@ -131,6 +135,12 @@ enum IOS18IconCatalog {
         imageCache.setObject(img, forKey: key)
         return img
     }
+
+    /// The icons that have Light artwork, filtered once. Entries
+    /// without a Light PNG used to show in the Light table as a
+    /// thumbnail-less row whose tap was a silent no-op - they are
+    /// excluded here instead (same pattern as darkIcons/tintedIcons).
+    static let lightIcons: [IOS18Icon] = all.filter { hasLight(slug: $0.slug) }
 
     /// The icons that have Dark artwork, filtered once. The Custom
     /// Icons page used to re-run this filter (a bundle file lookup

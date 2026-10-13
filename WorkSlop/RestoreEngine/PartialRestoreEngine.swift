@@ -60,9 +60,9 @@ actor PartialRestoreEngine {
     private var inFlight = false
     private var cancelFlag: CancelFlag?
 
-    /// Request cancellation. Honored BETWEEN phases; a restore exchange
-    /// already in flight is never cut (cutting a restore mid-write is
-    /// worse than letting it land).
+    /// Request cancellation. Honored mid-flight: the view cancels the
+    /// Task and the transport disconnects the socket, so an in-flight
+    /// exchange aborts cleanly instead of running on in the background.
     func cancel() {
         cancelFlag?.cancel()
     }
@@ -89,7 +89,9 @@ actor PartialRestoreEngine {
         cancelFlag = flag
         let watchdog = StallWatchdog()
         let stagingRoot = RestoreEngine.stagingRoot(label: request.deviceLabel)
-        let cancelled: @Sendable () -> Bool = { flag.isCancelled }
+        // Both the engine flag and Task.isCancelled stop the run —
+        // cancel works mid-exchange, not just between phases.
+        let cancelled: @Sendable () -> Bool = { flag.isCancelled || Task.isCancelled }
 
         func throwIfCancelled() throws {
             if flag.isCancelled || Task.isCancelled { throw RestoreError.cancelled }
@@ -127,7 +129,10 @@ actor PartialRestoreEngine {
             await watchdog.noteProgress()
             try await watchdog.check(phase: .restore)
 
-            // — 5. Push. Cancel is honored between phases, not mid-exchange —
+            // — 5. Push. Cancel is honored mid-exchange: the transport
+            // disconnects the socket on task cancellation. No wipe is
+            // involved on this route, so an interrupted push is safe —
+            // re-running Apply completes it.
             let served = try await transport.pushPartialRestore(
                 from: synth.backupRoot, udid: udid
             ) { f in

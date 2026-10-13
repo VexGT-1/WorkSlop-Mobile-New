@@ -164,6 +164,14 @@ actor RestoreEngine {
     private var cancelFlag: CancelFlag?
 
     /// Request cancellation of the in-flight run, if any.
+    ///
+    /// REAL cancel (not UI-only): the view also cancels the Swift Task
+    /// running start(), which (a) trips Task.isCancelled inside every
+    /// phase and transport loop, and (b) disconnects the device socket
+    /// via withTaskCancellationHandler, unblocking hung reads. The flag
+    /// here is the backstop for callers that never cancel the task.
+    /// After cancel: state .cancelled, sockets closed, no background
+    /// work survives.
     func cancel() {
         cancelFlag?.cancel()
     }
@@ -177,26 +185,40 @@ actor RestoreEngine {
     /// - iOS 27+   → the strict allowlist below (G1Support), then the
     ///   full BACKUP → PAYLOAD → MODIF → RESTORE → RESTART method.
     ///
-    /// Cancel is honored BETWEEN phases only. Once the restore push
-    /// starts, user cancel no longer interrupts it (desktop: never cut
-    /// an in-flight restore) — the check before phase 4 is the last
-    /// cancel point before the device is written, and restore+restart
-    /// then run as one atomic unit.
+    /// Cancel is honored MID-FLIGHT, not just between phases: the view
+    /// cancels the Task running start(); Task.isCancelled is checked in
+    /// every phase loop and transport loop, and the socket is
+    /// disconnected on cancellation so hung reads unblock immediately.
+    /// After cancel the engine reports .cancelled with sockets closed
+    /// and no background work remaining.
     func start(
         request: RestoreRequest,
-        transport: DeviceTransport = LoopbackTransport(),
+        transport: DeviceTransport? = nil,
         onProgress: @Sendable @escaping (RestoreProgress) -> Void
     ) async throws {
-        guard case .idle = state else { throw RestoreError.alreadyInFlight }
+        // Only an actually-running run blocks a new one. Terminal states
+        // (.succeeded/.failed/.cancelled) stay observable, but a new run
+        // may start from them — the old `guard case .idle` made the
+        // engine single-use per app launch (every second apply threw
+        // .alreadyInFlight with nothing in flight).
+        if case .running = state { throw RestoreError.alreadyInFlight }
         guard !request.stagedFeatureIDs.isEmpty else {
             throw RestoreError.nothingStaged
         }
+
+        // The request's backup password must reach the transport: the old
+        // default `LoopbackTransport()` silently dropped it (the user
+        // typed a password, the pull/restore ran without it). An
+        // explicitly passed transport is used as-is (caller-owned).
+        let transport = transport ?? LoopbackTransport(backupPassword: request.backupPassword)
 
         let flag = CancelFlag()
         cancelFlag = flag
         let watchdog = StallWatchdog()
         let stagingRoot = RestoreEngine.stagingRoot(label: request.deviceLabel)
-        let cancelled: @Sendable () -> Bool = { flag.isCancelled }
+        // Both the engine flag (view's cancel button) and Task.isCancelled
+        // (view cancelling the Task): either one stops the run.
+        let cancelled: @Sendable () -> Bool = { flag.isCancelled || Task.isCancelled }
 
         func throwIfCancelled() throws {
             if flag.isCancelled || Task.isCancelled { throw RestoreError.cancelled }
@@ -297,8 +319,10 @@ actor RestoreEngine {
 
             // — Phase 5: RESTART (with restart notification) —
             // Part of the same atomic unit as the restore once it landed:
-            // not skipped by a mid-restore cancel. Verifies the device
-            // comes back online before reporting success.
+            // not skipped by a mid-restore cancel. The reboot kills this
+            // app too (it runs on the device), so no post-reboot
+            // verification is possible — the reboot command being accepted
+            // is the honest completion signal.
             try await watchdog.check(phase: .restart)
             state = .running(.restart)
             await watchdog.noteProgress()

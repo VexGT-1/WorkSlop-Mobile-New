@@ -3,10 +3,11 @@ import UserNotifications
 
 // MARK: - Phase 5: RESTART (with restart notification)
 //
-// Tries the lockdown reboot first. Without a transport that throws
-// `.unimplemented`, and the phase degrades HONESTLY: it schedules a real
-// local notification telling the user to restart manually, and reports
-// `.manualRestartNotified` — never `.deviceRebooted`.
+// Tries the lockdown reboot first. If a transport ever throws
+// `.unimplemented` (none currently does), the phase degrades HONESTLY:
+// it schedules a real local notification telling the user to restart
+// manually, and reports `.manualRestartNotified` — never
+// `.deviceRebooted`.
 
 enum RestartPhase {
     enum Result: Sendable {
@@ -42,22 +43,20 @@ enum RestartPhase {
             return .manualRestartNotified(notificationScheduled: scheduled)
         }
 
-        // The pre-reboot session is dead by definition: verify the device
-        // came back with FRESH lockdown sessions (desktop:
-        // wait_for_ios27_device_online). A timeout is reported honestly —
-        // never as success, never as bricked.
-        progress(RestoreProgress(phase: .restart, fraction: 0.60,
-                                 message: "Waiting for the device to come back online…"))
-        let online = await transport.waitForDeviceOnline(timeoutSeconds: 300)
+        // The reboot kills this app too — we run ON the device we just
+        // rebooted. Post-reboot polling from inside the rebooted device
+        // is impossible (the process dies with the reboot), so there is
+        // no wait here: the reboot command was accepted (the socket
+        // dropped right after Restart), and the user reopens the app
+        // after the device boots. bootVerified=false is honest here —
+        // never a success claim, never a brick verdict.
         progress(RestoreProgress(
             phase: .restart,
             fraction: 1.0,
-            message: online
-                ? "Device is back online."
-                : "Device has not come back online within 5 minutes — it may still be booting " +
-                  "or stuck on the Apple logo. The full backup is kept on this computer."
+            message: "Reboot command sent — the app closes as the device restarts. " +
+                     "Reopen WorkSlop after the device boots; the full backup is kept on this device."
         ))
-        return .deviceRebooted(bootVerified: online)
+        return .deviceRebooted(bootVerified: false)
     }
 
     private static func scheduleRestartNotification() async -> Bool {

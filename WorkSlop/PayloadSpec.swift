@@ -114,42 +114,6 @@ enum PayloadSpecCatalog {
             ]
         ),
         PayloadSpec(
-            featureID: "pb-templates",
-            writes: [
-                PayloadWrite(
-                    domain: .appDomainPosterBoard,
-                    location: .directRestorePath,
-                    filePath: "AppDomain container / PRBPosterExtensionDataStore",
-                    restorePath: "/Library/Application Support/PRBPosterExtensionDataStore/<structure>/Extensions/<extension>/descriptors",
-                    fileTarget: "User-imported .batter templates. On desktop the restore domain/path for a template comes from that template's own config.json and is restored recursively per domain - there is no single fixed PosterBoard path for templates."
-                )
-            ]
-        ),
-                PayloadSpec(
-            featureID: "pb-video-freeze",
-            writes: [
-                PayloadWrite(
-                    domain: .appDomainPosterBoard,
-                    location: .directRestorePath,
-                    filePath: "AppDomain container / PRBPosterExtensionDataStore",
-                    restorePath: "/Library/Application Support/PRBPosterExtensionDataStore/<structure>/Extensions/<extension>/descriptors",
-                    fileTarget: "Freeze-frame video wallpaper (desktop create_live_photo_files): a video plus a freeze-frame thumbnail becomes a live-photo style .tendies descriptor set."
-                )
-            ]
-        ),
-        PayloadSpec(
-            featureID: "pb-video-loop",
-            writes: [
-                PayloadWrite(
-                    domain: .appDomainPosterBoard,
-                    location: .directRestorePath,
-                    filePath: "AppDomain container / PRBPosterExtensionDataStore",
-                    restorePath: "/Library/Application Support/PRBPosterExtensionDataStore/<structure>/Extensions/<extension>/descriptors",
-                    fileTarget: "Looped video wallpaper (desktop create_video_loop_files): the video loops via CAML with Calculation Mode Linear or Discrete, packaged as a .tendies descriptor set."
-                )
-            ]
-        ),
-        PayloadSpec(
             featureID: "pb-reset",
             writes: [
                 PayloadWrite(
@@ -910,20 +874,6 @@ PayloadSpec(
         ),
         // Desktop: src/gui/ios/daemons.py; src/tweaks/daemons_tweak.py (labels).
         PayloadSpec(
-            featureID: "dm-internettethering",
-            writes: [
-                PayloadWrite(
-                    domain: .databaseDomain,
-                    location: .fileLocation(member: "FileLocation.disabledDaemons"),
-                    filePath: "/var/db/com.apple.xpc.launchd/disabled.plist",
-                    restorePath: "com.apple.xpc.launchd/disabled.plist",
-                    key: "com.apple.MobileInternetSharing",
-                    value: .bool(true)
-                )
-            ]
-        ),
-        // Desktop: src/gui/ios/daemons.py; src/tweaks/daemons_tweak.py (labels).
-        PayloadSpec(
             featureID: "dm-passbook",
             writes: [
                 PayloadWrite(
@@ -1036,20 +986,6 @@ PayloadSpec(
                     filePath: "/var/db/com.apple.xpc.launchd/disabled.plist",
                     restorePath: "com.apple.xpc.launchd/disabled.plist",
                     key: "com.apple.followupd",
-                    value: .bool(true)
-                )
-            ]
-        ),
-        // Desktop: src/gui/ios/daemons.py; src/tweaks/daemons_tweak.py (labels).
-        PayloadSpec(
-            featureID: "dm-location",
-            writes: [
-                PayloadWrite(
-                    domain: .databaseDomain,
-                    location: .fileLocation(member: "FileLocation.disabledDaemons"),
-                    filePath: "/var/db/com.apple.xpc.launchd/disabled.plist",
-                    restorePath: "com.apple.xpc.launchd/disabled.plist",
-                    key: "com.apple.locationd",
                     value: .bool(true)
                 )
             ]
@@ -1506,32 +1442,6 @@ PayloadSpec(
 
 
                                                 
-        // Desktop: src/tweaks/status_bar/status_bar_tweak.py:75-84;
-        // src/tweaks/status_bar/status_setter.py:182-195,279-281;
-        // src/devicemanagement/device_manager.py:2314-2336.
-        PayloadSpec(
-            featureID: "status-bar",
-            writes: [
-                PayloadWrite(
-                    domain: .homeDomain,
-                    location: .directRestorePath,
-                    filePath: "/var/mobile/Library/SpringBoard/statusBarOverrides",
-                    restorePath: "/Library/SpringBoard/statusBarOverrides",
-                    fileTarget: "Serialized StatusBarOverrideData struct (3,944 bytes), generated from the desktop StatusBar override state; not a plist and not a single fixed key/value.",
-                    condition: "Classic pre-iOS 27 (iOS 26.x) branch. iOS 27 keeps carrier text only."
-                ),
-                PayloadWrite(
-                    domain: .homeDomain,
-                    location: .directRestorePath,
-                    filePath: "/var/mobile/Library/SpringBoard/StatusBarOverrides.archive",
-                    restorePath: "/Library/SpringBoard/StatusBarOverrides.archive",
-                    fileTarget: "StatusBarOverrides.archive (desktop apply_ios27_tweak): an archive SpringBoard unarchives itself, carrying the carrier names only - every other override has no representation in the archive and is dropped.",
-                    condition: "iOS 27 branch. The classic struct above is not read on iOS 27."
-                )
-            ],
-            note: "The desktop target and serialization size are pinned, but the mobile toggle alone does not specify the individual field values inside the struct."
-        ),
-
         // Desktop: src/tweaks/registry.py:80-92,133-135;
         // src/tweaks/tweak_classes.py:83-129;
         // src/tweaks/basic_plist_locations.py:11.
@@ -1710,22 +1620,6 @@ PayloadSpec(
             ]
         ),
 
-        // Desktop: src/tweaks/registry.py:183-184;
-        // src/tweaks/basic_plist_locations.py:8.
-        PayloadSpec(
-            featureID: "sb-hide-search",
-            writes: [
-                PayloadWrite(
-                    domain: .managedPreferencesDomain,
-                    location: .fileLocation(member: "FileLocation.springboard"),
-                    filePath: "/var/Managed Preferences/mobile/com.apple.springboard.plist",
-                    restorePath: "mobile/com.apple.springboard.plist",
-                    key: "SBHomeScreenShowsSearchAffordance",
-                    value: .bool(false)
-                )
-            ]
-        ),
-
         // Desktop: src/tweaks/registry.py:188;
         // src/tweaks/basic_plist_locations.py:20.
         PayloadSpec(
@@ -1803,22 +1697,6 @@ PayloadSpec(
                     filePath: "/var/Managed Preferences/mobile/.GlobalPreferences.plist",
                     restorePath: "mobile/.GlobalPreferences.plist",
                     key: "SBIconVisibility",
-                    value: .bool(true)
-                )
-            ]
-        ),
-
-        // Desktop: src/tweaks/registry.py:224-225;
-        // src/tweaks/basic_plist_locations.py:20.
-        PayloadSpec(
-            featureID: "in-key-flicks",
-            writes: [
-                PayloadWrite(
-                    domain: .managedPreferencesDomain,
-                    location: .fileLocation(member: "FileLocation.globalPreferences"),
-                    filePath: "/var/Managed Preferences/mobile/.GlobalPreferences.plist",
-                    restorePath: "mobile/.GlobalPreferences.plist",
-                    key: "GesturesEnabled",
                     value: .bool(true)
                 )
             ]

@@ -69,9 +69,6 @@ struct FeatureToggleRow: View {
             }
         }
         lines.append("Route: \(feature.routeSummary). Support: \(feature.window.label).")
-        if feature.id == "status-bar" {
-            lines.append("Classic overrides are iOS 26.x; on iOS 27 only the carrier names apply.")
-        }
         return lines.joined(separator: "\n\n")
     }
 
@@ -133,9 +130,16 @@ struct FeatureToggleRow: View {
 /// added or deleted, which used to open the wrong entry or a blank
 /// sheet. Deletion is an explicit trailing swipe action (swipe
 /// right-to-left) so it always works, with or without edit mode.
+///
+/// The editor is presented with `.sheet(item:)` over a draft copy of
+/// the entry captured at tap time. The sheet content is therefore
+/// never empty: an empty sheet is auto-dismissed by iOS on
+/// presentation, which was the "editor closes by itself" bug (the
+/// previous `.sheet(isPresented:)` + conditional `if let` content
+/// could evaluate empty on a state-update race).
 struct YourIconsSection: View {
     @EnvironmentObject private var stage: IconStage
-    @State private var editingID: UUID?
+    @State private var editingDraft: CustomIconEntry?
 
     var body: some View {
         Section {
@@ -160,7 +164,7 @@ struct YourIconsSection: View {
                             .foregroundStyle(.secondary)
                     }
                     Spacer()
-                    Button("Edit") { editingID = entry.id }
+                    Button("Edit") { editingDraft = entry }
                         .font(.footnote)
                 }
                 .swipeActions(edge: .trailing, allowsFullSwipe: true) {
@@ -175,7 +179,7 @@ struct YourIconsSection: View {
             }
             Button("Add app icon") {
                 let idx = stage.addBlank()
-                editingID = stage.entries[idx].id
+                editingDraft = stage.entries[idx]
             }
             .accessibilityIdentifier("icons-add")
         } header: {
@@ -183,40 +187,48 @@ struct YourIconsSection: View {
         } footer: {
             Text("Pick an image, fill the app name and its bundle ID (for example com.apple.mobilesafari). Staged icons are written as Home Screen web clips by the same restore payload as the desktop icon themes.")
         }
-        .sheet(isPresented: Binding(
-            get: { editingID != nil },
-            set: { if !$0 { editingID = nil } }
-        )) {
-            if let id = editingID,
-               let i = stage.entries.firstIndex(where: { $0.id == id }) {
-                IconEditorView(entry: $stage.entries[i], stage: stage) {
-                    editingID = nil
-                }
-            }
+        .sheet(item: $editingDraft) { draft in
+            IconEditorView(
+                draft: draft,
+                onSave: { updated in
+                    stage.update(updated)
+                    editingDraft = nil
+                },
+                onCancel: { editingDraft = nil }
+            )
         }
     }
 }
 
-/// The per-icon editor. Takes a live Binding to the entry (resolved
-/// by UUID at presentation time), so it always edits the right icon
-/// even if the list changed underneath.
+/// The per-icon editor. Works on a private draft captured at
+/// presentation time (never a live binding into the array): the
+/// form can't be invalidated by list mutations mid-edit, and Done
+/// writes the draft back explicitly via `IconStage.update(_:)`.
 struct IconEditorView: View {
-    @Binding var entry: CustomIconEntry
-    @ObservedObject var stage: IconStage
-    var onDone: () -> Void
+    @State private var draft: CustomIconEntry
+    var onSave: (CustomIconEntry) -> Void
+    var onCancel: () -> Void
     @State private var picked: PhotosPickerItem?
+
+    init(draft: CustomIconEntry,
+         onSave: @escaping (CustomIconEntry) -> Void,
+         onCancel: @escaping () -> Void) {
+        _draft = State(initialValue: draft)
+        self.onSave = onSave
+        self.onCancel = onCancel
+    }
 
     var body: some View {
         NavigationStack {
             Form {
                 Section("App") {
-                    TextField("App name", text: $entry.appName)
-                    TextField("Bundle ID", text: $entry.bundleID)
+                    TextField("App name", text: $draft.appName)
+                    TextField("Bundle ID", text: $draft.bundleID)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                 }
                 Section("Icon image") {
-                    if let data = entry.imageData, let img = EntryImageCache.full(data) {
+                    if let data = draft.imageData, let img = EntryImageCache.full(data) {
                         Image(uiImage: img)
                             .resizable()
                             .scaledToFit()
@@ -233,9 +245,11 @@ struct IconEditorView: View {
             }
             .navigationTitle("Icon")
             .toolbar {
-                Button("Done") {
-                    stage.save()
-                    onDone()
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { onCancel() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { onSave(draft) }
                 }
             }
             .onChange(of: picked) { item in
@@ -243,8 +257,7 @@ struct IconEditorView: View {
                     if let raw = try? await item?.loadTransferable(type: Data.self),
                        let image = UIImage(data: raw),
                        let png = image.pngData() {
-                        entry.imageData = png
-                        stage.save()
+                        draft.imageData = png
                     }
                 }
             }

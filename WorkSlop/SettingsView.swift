@@ -39,7 +39,7 @@ struct SettingsView: View {
             }
 
             Section {
-                Text("WorkSlop Mobile is free software, licensed under the GNU General Public License v3.0 or later - the same license as the Nugget project it descends from.")
+                Text("WorkSlop Mobile is free software, licensed under the GNU General Public License v3.0 or later.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                 Link("Read the full license (GPL-3.0)",

@@ -15,6 +15,7 @@ struct MainMenuView: View {
     let demoScreen: String?
     @EnvironmentObject private var status: StatusStore
     @EnvironmentObject private var selection: SelectionStore
+    @EnvironmentObject private var iconStage: IconStage
     @State private var path: [HomeRoute] = []
     @State private var importing = false
     @State private var pairingNote: String?
@@ -191,6 +192,7 @@ struct MainMenuView: View {
             }
             .font(.subheadline)
             .buttonStyle(.plain)
+            .padding(.bottom, 8)
         }
         .padding(.horizontal, 16)
         .background(cardBackground)
@@ -220,14 +222,21 @@ struct MainMenuView: View {
     }
 
     private var canApply: Bool {
-        status.unlocked && !selection.staged.isEmpty
+        status.unlocked && (!selection.staged.isEmpty || hasStagedIcons)
+    }
+
+    /// True when at least one custom icon has a bundle ID (matches
+    /// ApplyView's gate so the Home button and the Apply screen agree).
+    private var hasStagedIcons: Bool {
+        iconStage.entries.contains { !$0.bundleID.isEmpty }
     }
 
     private var applyLabel: String {
-        if selection.staged.isEmpty { return "Apply (stage tweaks first)" }
+        let total = selection.staged.count + (hasStagedIcons ? 1 : 0)
+        if total == 0 { return "Apply (stage tweaks first)" }
         if !status.pairingImported { return "Apply (import pairing file first)" }
         if !status.vpnDetected { return "Apply (VPN tunnel not detected)" }
-        return "Apply (\(selection.staged.count) tweaks)"
+        return "Apply (\(total) tweaks)"
     }
 
     // MARK: - Menus

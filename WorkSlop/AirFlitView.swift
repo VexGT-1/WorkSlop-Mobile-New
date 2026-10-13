@@ -2,6 +2,14 @@ import SwiftUI
 import PhotosUI
 import UniformTypeIdentifiers
 
+extension UTType {
+    /// AirCard passcode theme file (ZIP with per-digit PNGs).
+    /// Declared in project.yml UTExportedTypeDeclarations.
+    static var passthm: UTType {
+        UTType("com.adnan120hz.workslop.passthm") ?? .zip
+    }
+}
+
 /// AirFlit: custom passcode themes + Apple Wallet card images,
 /// using 100% the AirCard method (AirTraffic via AirliftFFI).
 /// NOT sparse restore — this menu rides its own delivery channel.
@@ -136,7 +144,7 @@ struct AirFlitView: View {
         .navigationBarTitleDisplayMode(.inline)
         .fileImporter(
             isPresented: $showPassthmImporter,
-            allowedContentTypes: [.zip]
+            allowedContentTypes: [.passthm, .zip]
         ) { result in
             switch result {
             case .success(let url):

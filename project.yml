@@ -32,6 +32,13 @@ targets:
             UTTypeTagSpecification:
               public.filename-extension:
                 - batter
+          - UTTypeIdentifier: com.adnan120hz.workslop.passthm
+            UTTypeDescription: AirFlit passcode theme
+            UTTypeConformsTo:
+              - public.zip-archive
+            UTTypeTagSpecification:
+              public.filename-extension:
+                - passthm
     sources:
       - path: WorkSlop
         excludes:

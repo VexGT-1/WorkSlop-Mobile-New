@@ -339,13 +339,8 @@ struct TunnelInfoView: View {
                 }
                 Section("Apps that can open the tunnel") {
                     VStack(alignment: .leading, spacing: 3) {
-                        Text("WireGuard").font(.body.weight(.semibold))
-                        Text("The official WireGuard app (free). With a loopback configuration it opens the tunnel WorkSlop detects - the standard choice.")
-                            .font(.footnote).foregroundStyle(.secondary)
-                    }
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("StikDebug").font(.body.weight(.semibold))
-                        Text("Free. Creates its own local VPN profile for the same kind of loopback tunnel.")
+                        Text("LocalDevVPN").font(.body.weight(.semibold))
+                        Text("Opens the loopback tunnel WorkSlop detects.")
                             .font(.footnote).foregroundStyle(.secondary)
                     }
                 }

@@ -161,7 +161,7 @@ enum ActivationGate {
         if !pairingReady {
             return "Locked: import the pairing file (.plist) in Settings first."
         }
-        return "Locked: start your VPN tunnel (WireGuard or a compatible loopback tunnel) first."
+        return "Locked: start your VPN tunnel (LocalDevVPN loopback tunnel) first."
     }
 }
 
@@ -194,12 +194,12 @@ enum DeviceStatus {
     ///
     /// Loopback (127.0.0.1/::1) on a utun interface COUNTS as a tunnel:
     /// WorkSlop's whole method is a loopback tunnel back into the same
-    /// iPhone, and a WireGuard loopback configuration assigns 127.0.0.1
+    /// iPhone, and a LocalDevVPN loopback configuration assigns 127.0.0.1
     /// to its utun. lo0 is already excluded by the utun-prefix check, so
     /// 127.0.0.1 here can only mean a deliberate loopback tunnel —
     /// exactly what this app needs. (The old code skipped loopback with
     /// "never a VPN tunnel" — domain-wrong for this app, and the reason
-    /// WireGuard loopback tunnels showed "-" while 10.x tunnels worked.)
+    /// LocalDevVPN loopback tunnels showed "-" while 10.x tunnels worked.)
     /// Link-local (fe80::/10) is still skipped: idle system utun
     /// interfaces carry only auto-assigned link-local, and accepting
     /// those would false-positive on phones with no real tunnel.
@@ -225,7 +225,7 @@ enum DeviceStatus {
             // idle system utun interfaces carry only auto-assigned
             // link-local, so accepting it would false-positive.
             // Loopback (127.0.0.1/::1) IS accepted here — on a utun
-            // interface it means a deliberate loopback tunnel (WireGuard
+            // interface it means a deliberate loopback tunnel (LocalDevVPN
             // loopback configuration), which is exactly this app's method.
             // lo0 can't reach this point (utun-prefix check above).
             if addr.hasPrefix("fe80") || addr.hasPrefix("FE80") { continue }

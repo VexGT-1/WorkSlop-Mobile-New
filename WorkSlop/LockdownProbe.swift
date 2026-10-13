@@ -4,7 +4,7 @@ import Network
 /// Lockdown reachability probe for the on-device engine.
 ///
 /// The on-device route talks to THIS phone's own lockdownd over the
-/// loopback WireGuard tunnel, authenticated with the imported pairing
+/// loopback LocalDevVPN tunnel, authenticated with the imported pairing
 /// record (the same design SideStore-class apps use). This probe does
 /// the first real steps of that session:
 ///
@@ -26,7 +26,7 @@ enum LockdownProbe {
 
         var summary: String {
             guard let addr = tunnelAddress else {
-                return "No VPN tunnel address on this device - start your VPN tunnel (WireGuard or compatible) first."
+                return "No VPN tunnel address on this device - start your LocalDevVPN tunnel first."
             }
             if lockdownReachable {
                 return "Lockdown reachable at \(addr):62078 (\(lockdownType ?? "lockdownd")). Pairing session (TLS) is the next engine step."

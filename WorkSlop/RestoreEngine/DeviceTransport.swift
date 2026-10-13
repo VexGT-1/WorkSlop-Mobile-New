@@ -4,7 +4,7 @@ import SQLite3
 
 // MARK: - Device transport: real loopback implementation
 //
-// Talks to the device's own lockdownd over the loopback tunnel (WireGuard
+// Talks to the device's own lockdownd over the loopback tunnel (LocalDevVPN
 // tunnel app installed separately; presence detected by
 // DeviceStatus.vpnTunnelActive()). Pure Swift, no FFI:
 //   LockdownClient (CFStream, STARTTLS) + MobileBackup2Client

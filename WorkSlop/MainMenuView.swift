@@ -367,7 +367,7 @@ struct AboutInfoView: View {
 
                 Section {
                     Text("1. Import your pairing file (.plist) on this screen. On iOS 26 it comes from a computer (iDevice Pair / Apple Configurator); without it nothing can be delivered.")
-                    Text("2. Start a loopback VPN tunnel (WireGuard or StikDebug with a loopback configuration) until the VPN tunnel row above says DETECTED. This is not an internet VPN - no traffic leaves your iPhone.")
+                    Text("2. Start a loopback VPN tunnel using LocalDevVPN until the VPN tunnel row above says DETECTED. This is not an internet VPN - no traffic leaves your iPhone.")
                     Text("3. Open All Tweaks, pick a category, and stage the tweaks you want with the toggles.")
                     Text("4. Back on Home, tap Apply. Confirm Find My is OFF, then follow the progress. When it finishes, restart your iPhone manually and check the tweaks.")
                 } header: {

@@ -359,6 +359,6 @@ struct ApplyView: View {
         running = false
         cancelling = false
         logLines.append("[WorkSlop] Cancelled during \(phaseName) — all connections closed, no background work remains.")
-        result = wasRestore ? .cancelledDuringRestore(phaseName) : .cancelled(phaseName)
+        result = wasRestore ? .cancelledDuringRestore(phaseName: phaseName) : .cancelled(phaseName: phaseName)
     }
 }

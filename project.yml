@@ -36,11 +36,20 @@ targets:
       - path: WorkSlop
         excludes:
           - iOS18Icons
+          # CI-downloaded prebuilt (see .github/workflows/build-and-record.yml);
+          # never committed, excluded so xcodegen doesn't treat it as source.
+          - Frameworks
       - path: WorkSlop/iOS18Icons
         type: folder
     dependencies:
       - sdk: libsqlite3.tbd
       - package: ZIPFoundation
+      # AirliftFFI (AirCard method, AirFlit menu). Downloaded by CI into
+      # WorkSlop/Frameworks/ before xcodegen runs. Xcode auto-selects the
+      # ios-arm64 slice for device builds. Swift code guards with
+      # #if canImport(AirliftFFI) so the target still compiles locally
+      # without the framework present.
+      - framework: WorkSlop/Frameworks/AirliftFFI.xcframework
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.adnan120hz.workslop

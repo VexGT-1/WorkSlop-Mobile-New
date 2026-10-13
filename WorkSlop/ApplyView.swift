@@ -167,7 +167,12 @@ struct ApplyView: View {
                     .accessibilityIdentifier("apply-cancel")
                 }
             } footer: {
-                Text("Cancel stops the run for real: the task is cancelled, device connections are closed, and no background work continues. If cancelled during Restore, re-run Apply to complete the changes.")
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Cancel stops the run for real: the task is cancelled, device connections are closed, and no background work continues. If cancelled during Restore, re-run Apply to complete the changes.")
+                    Text("IMPORTANT: if Cancel does not respond or the app hangs, you MUST fully close WorkSlop (swipe it away from the app switcher). If the problem persists, restart your iPhone manually (Settings → General → Shut Down). This is required to keep your device safe.")
+                }
+                .font(.footnote)
+                .foregroundStyle(.secondary)
             }
         }
         .navigationTitle("Apply")

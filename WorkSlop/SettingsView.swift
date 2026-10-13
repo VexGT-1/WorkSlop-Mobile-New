@@ -10,6 +10,19 @@ struct SettingsView: View {
             SkyBackground()
             List {
                 Section {
+                    NavigationLink {
+                        SetupGuideView()
+                    } label: {
+                        Label("Setup guide: tunnel app + pairing file", systemImage: "book.fill")
+                    }
+                    Text("If Apply fails, the Result section names the failing phase (backup / restore / handshake / tunnel) with the specific error — that exact text is what a fix needs, not just \"backend mati\".")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                } header: {
+                    Text("Help")
+                }
+
+            Section {
                 LabeledContent("Version", value: "15.0")
                 LabeledContent("This device's iOS", value: DeviceInfoEx.fullVersion)
                 Text("iOS 26 and below: Partial restore (sparse restore, no wipe). iOS 27: Full backup → modify → restore with all data - the WorkSlop Desktop method.")

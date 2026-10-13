@@ -43,6 +43,7 @@ targets:
       - path: WorkSlop
         excludes:
           - iOS18Icons
+          - WorkSlop.entitlements
           # CI-downloaded prebuilt (see .github/workflows/build-and-record.yml);
           # never committed, excluded so xcodegen doesn't treat it as source.
           - Frameworks
@@ -65,6 +66,10 @@ targets:
         CURRENT_PROJECT_VERSION: "1"
         SWIFT_VERSION: "5.0"
         TARGETED_DEVICE_FAMILY: "1,2"
+        # Private entitlements (mobilebackup/lockdown) are inert on stock iOS
+        # and honored under TrollStore/jailbreak. See WorkSlop.entitlements
+        # for the honest notes. Unsigned CI builds ignore this harmlessly.
+        CODE_SIGN_ENTITLEMENTS: WorkSlop/WorkSlop.entitlements
   WorkSlopUITests:
     type: bundle.ui-testing
     platform: iOS

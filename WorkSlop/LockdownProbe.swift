@@ -67,19 +67,41 @@ enum LockdownProbe {
         return out
     }
 
-    /// Probe the first tunnel address for a lockdownd answer (the
-    /// loopback route uses one utun address; checking the rest would
-    /// only repeat the same stack).
+    /// Probe every tunnel address for a lockdownd answer and report the
+    /// first one that answers. Previously only candidates.first was
+    /// probed: if the first utun address wasn't the loopback (e.g. an
+    /// IPv6 or stale entry sorted first), the probe reported "lockdownd
+    /// did not answer" even though 127.0.0.1:62078 was reachable — a
+    /// false "backend mati".
     static func probe(completion: @escaping (Result) -> Void) {
         let candidates = tunnelAddresses()
-        guard let first = candidates.first else {
+        guard !candidates.isEmpty else {
             completion(Result(tunnelAddress: nil, lockdownReachable: false, lockdownType: nil))
             return
         }
-        probeCandidate(first) { type in
-            completion(Result(tunnelAddress: first,
-                              lockdownReachable: type != nil,
-                              lockdownType: type))
+        probeNext(candidates, index: 0, completion: completion)
+    }
+
+    private static func probeNext(_ candidates: [String], index: Int,
+                                 completion: @escaping (Result) -> Void) {
+        guard index < candidates.count else {
+            // Nothing answered: report the first candidate so the summary
+            // still names an address to check, instead of claiming there
+            // is no tunnel at all.
+            completion(Result(tunnelAddress: candidates.first,
+                              lockdownReachable: false,
+                              lockdownType: nil))
+            return
+        }
+        let host = candidates[index]
+        probeCandidate(host) { type in
+            if let type = type {
+                completion(Result(tunnelAddress: host,
+                                  lockdownReachable: true,
+                                  lockdownType: type))
+            } else {
+                probeNext(candidates, index: index + 1, completion: completion)
+            }
         }
     }
 

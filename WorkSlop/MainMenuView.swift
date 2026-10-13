@@ -331,13 +331,20 @@ struct MainMenuView: View {
         guard let data = try? Data(contentsOf: url) else {
             return "The file could not be read - nothing was saved."
         }
-        guard PairingStore.validate(data) else {
-            return "That file is not a readable pairing record (.plist) - nothing was saved."
+        guard let format = PairingStore.format(of: data) else {
+            // Specific reason instead of a generic rejection: the user
+            // learns exactly what is wrong with their file.
+            return PairingStore.diagnose(data) + " Nothing was saved."
         }
         do {
             try PairingStore.save(data)
             status.pairingChanged()
-            return "Pairing file saved."
+            switch format {
+            case .legacy:
+                return "Pairing file saved (lockdown format)."
+            case .remotePairing:
+                return "Pairing file saved (iOS 17+ RemotePairing format)."
+            }
         } catch {
             return "Could not save the pairing file: \(error.localizedDescription)"
         }

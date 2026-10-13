@@ -133,6 +133,12 @@ struct ApplyView: View {
                         Text(message)
                             .font(.footnote)
                             .foregroundStyle(.secondary)
+                        NavigationLink {
+                            SetupGuideView()
+                        } label: {
+                            Label("Open the setup guide", systemImage: "book.fill")
+                                .font(.footnote)
+                        }
                     case .cancelled(let phaseName):
                         Label("Cancelled", systemImage: "stop.circle")
                             .foregroundStyle(Color.orange)
@@ -166,6 +172,13 @@ struct ApplyView: View {
                     .disabled(cancelling)
                     .accessibilityIdentifier("apply-cancel")
                 }
+
+                NavigationLink {
+                    SetupGuideView()
+                } label: {
+                    Label("Setup guide: tunnel app + pairing file", systemImage: "book.fill")
+                }
+                .accessibilityIdentifier("setup-guide")
             } footer: {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Cancel stops the run for real: the task is cancelled, device connections are closed, and no background work continues. If cancelled during Restore, re-run Apply to complete the changes.")
@@ -360,5 +373,44 @@ struct ApplyView: View {
         cancelling = false
         logLines.append("[WorkSlop] Cancelled during \(phaseName) — all connections closed, no background work remains.")
         result = wasRestore ? .cancelledDuringRestore(phaseName: phaseName) : .cancelled(phaseName: phaseName)
+    }
+}
+
+// MARK: - Setup guide
+
+/// Step-by-step: tunnel app + pairing file. This is the missing manual
+/// that "backend mati" reports kept asking for: most failures are not
+/// code bugs but a missing tunnel app or a bad pairing file, and the
+/// preflight rows only say WHAT is red, never HOW to fix it.
+struct SetupGuideView: View {
+    var body: some View {
+        List {
+            Section("1 — Install the tunnel app") {
+                Text("WorkSlop talks to this iPhone's own lockdownd service through a loopback VPN tunnel (a utun interface pointing at 127.0.0.1). iOS apps cannot open that tunnel themselves — a separate tunnel app does it.")
+                Label("Install LocalDevVPN (the tunnel app WorkSlop detects)", systemImage: "1.circle")
+                Text("Open LocalDevVPN and enable its loopback configuration (tunnel IP 127.0.0.1). Keep it running while you use WorkSlop.")
+                    .font(.footnote).foregroundStyle(.secondary)
+            }
+            Section("2 — Export a pairing file") {
+                Text("The tunnel session is authenticated with a pairing file. Export one on a computer:")
+                Label("Option A: run \"idevicepair pair\" on a Mac/PC, then copy the generated .plist to this iPhone (AirDrop / Files).", systemImage: "2.circle")
+                Label("Option B: use the Jitterbug app to pair and export the pairing file.", systemImage: "2.circle")
+                Text("Tip: on iOS 17+ the export may be a RemotePairing file (identifier/private_key/public_key). WorkSlop accepts it for import, but the TLS session upgrade for that format is still unverified — if Apply fails at the handshake, re-export a legacy lockdown pairing file instead.")
+                    .font(.footnote).foregroundStyle(.secondary)
+            }
+            Section("3 — Import it here") {
+                Label("Main menu → \"Import pairing file (.plist)\" and pick the file.", systemImage: "3.circle")
+                Text("A bad file is rejected at import with the exact reason (not a plist, empty, missing keys) — nothing is saved until the file is a recognised pairing record.")
+                    .font(.footnote).foregroundStyle(.secondary)
+            }
+            Section("4 — Verify, then Apply") {
+                Label("Back on the main menu, refresh the device status: both \"Pairing file\" and \"VPN tunnel detected\" must be green.", systemImage: "4.circle")
+                Label("Open Apply: every preflight row must be green before \"Apply now\" enables.", systemImage: "5.circle")
+                Text("If a run fails, the Result section names the failing phase (backup / restore / handshake / tunnel) with the device's own error — send that exact text when asking for help, not just \"backend mati\".")
+                    .font(.footnote).foregroundStyle(.secondary)
+            }
+        }
+        .navigationTitle("Setup guide")
+        .navigationBarTitleDisplayMode(.inline)
     }
 }

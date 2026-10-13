@@ -515,14 +515,21 @@ actor LockdownClient {
     /// Builds the TLS client identity (RootCertificate+RootPrivateKey, as
     /// idevice_connection_enable_ssl does with OpenSSL).
     private func makeTLSIdentity(from identity: PairingIdentity) throws -> SecIdentity {
-        // UNVERIFIED: RemotePairing records carry no certificate material.
-        // libimobiledevice has no RemotePairing TLS code to verify against;
-        // the correct client-auth mechanism for such records on iOS 17+
-        // needs device testing. Refusing loudly instead of guessing.
+        // RemotePairing records carry no certificate material, so there is
+        // no TLS client identity to build from them. libimobiledevice has no
+        // RemotePairing TLS code to verify against; the correct client-auth
+        // mechanism for such records on iOS 17+ needs device testing.
+        // Refusing loudly instead of guessing — and telling the user the
+        // concrete workaround (a legacy lockdown pairing file, exportable
+        // with idevicepair/Jitterbug on a computer).
         guard let certDER = identity.rootCertDER, let keyPKCS8 = identity.rootKeyDER else {
             throw LockdownError.tlsFailed(
-                "pairing record has no RootCertificate/RootPrivateKey (RemotePairing format); " +
-                "TLS client-auth mechanism for this record type is unverified — needs a device to determine")
+                "The imported pairing file is an iOS 17+ RemotePairing record " +
+                "(identifier/private_key/public_key), which carries no certificate " +
+                "for the TLS session upgrade — and that upgrade path is unverified. " +
+                "Workaround: export a legacy lockdown pairing file instead " +
+                "(pair with idevicepair or Jitterbug on a computer, then import " +
+                "the .plist here) and re-run Apply.")
         }
         let pfx = PKCS12.build(keyPKCS8: keyPKCS8, certDER: certDER)
         var items: CFArray?

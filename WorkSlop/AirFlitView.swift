@@ -1,5 +1,6 @@
 import SwiftUI
 import PhotosUI
+import UniformTypeIdentifiers
 
 /// AirFlit: custom passcode themes + Apple Wallet card images,
 /// using 100% the AirCard method (AirTraffic via AirliftFFI).
@@ -16,6 +17,7 @@ struct AirFlitView: View {
     @State private var passcodeItem: PhotosPickerItem?
     @State private var walletItem: PhotosPickerItem?
     @State private var importingPairing = false
+    @State private var importingPassthm = false
 
     var body: some View {
         ZStack {
@@ -56,6 +58,18 @@ struct AirFlitView: View {
                 }
 
                 Section {
+                    // .passthm file import (AirCard's native theme format)
+                    Button {
+                        importingPassthm = true
+                    } label: {
+                        Label(vm.passthmURL == nil ? "Import .passthm theme…" : "Change .passthm theme…",
+                              systemImage: "doc.zipper")
+                    }
+                    if vm.passthmURL != nil {
+                        Text("Loaded .passthm with \(vm.passthmFileCount) key images.")
+                            .font(.caption)
+                            .foregroundStyle(.green)
+                    }
                     if let img = vm.passcodeImage {
                         Image(uiImage: img)
                             .resizable()
@@ -72,6 +86,8 @@ struct AirFlitView: View {
                             if let raw = try? await item?.loadTransferable(type: Data.self),
                                let img = UIImage(data: raw) {
                                 vm.passcodeImage = img
+                                vm.passthmURL = nil // single image clears .passthm
+                                vm.passthmFileCount = 0
                             }
                         }
                     }
@@ -82,7 +98,7 @@ struct AirFlitView: View {
                             .frame(maxWidth: .infinity, alignment: .center)
                     }
                     .buttonStyle(.borderedProminent)
-                    .disabled(vm.passcodeImage == nil || vm.running || !vm.iosOK || !AirFlitEngine.hasPairingFile)
+                    .disabled((vm.passcodeImage == nil && vm.passthmURL == nil) || vm.running || !vm.iosOK || !AirFlitEngine.hasPairingFile)
                     Text("Writes to the TelephonyUI keypad cache. Lock your iPhone to see the new keypad — no restart needed.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -166,6 +182,14 @@ struct AirFlitView: View {
                 vm.savePairingFile(from: url)
             case .failure:
                 vm.pairingNote = "Import cancelled."
+            }
+        }
+        .fileImporter(isPresented: $importingPassthm, allowedContentTypes: [UTType(filenameExtension: "passthm") ?? .zip]) { result in
+            switch result {
+            case .success(let url):
+                vm.loadPassthm(from: url)
+            case .failure:
+                break
             }
         }
     }

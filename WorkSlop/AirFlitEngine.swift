@@ -33,10 +33,12 @@ enum AirFlitEngine {
     // MARK: - Pairing
 
     /// AirFlit keeps its own copy of the pairing file, in the same
-    /// Documents folder the user already imports into. The AirCard
-    /// pairing format (RPPairing host output) is what AirliftFFI
-    /// expects — it is NOT the same bytes as the lockdown pairing
-    /// record WorkSlop's restore engine uses.
+    /// Documents folder the user already imports into. AirliftFFI
+    /// accepts standard pairing files (.plist / .mobiledevicepairing /
+    /// .mobilepair from SideStore, AltStore, etc.) — the same kind
+    /// WorkSlop's restore engine uses. If AirFlit reports an auth
+    /// failure, re-export a fresh pairing file from your sideload
+    /// tool and import it here.
     static var pairingFileURL: URL {
         FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("airlift_pairing.plist")

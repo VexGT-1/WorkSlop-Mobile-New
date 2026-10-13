@@ -37,21 +37,14 @@ enum AirFlitEngine {
     /// accepts standard pairing files (.plist / .mobiledevicepairing /
     /// .mobilepair from SideStore, AltStore, etc.) — the same kind
     /// WorkSlop's restore engine uses. If AirFlit reports an auth
-    /// failure, re-export a fresh pairing file from your sideload
-    /// tool and import it here.
+    /// Uses the shared pairing file from Home (PairingStore).
+    /// No separate AirFlit pairing — one pairing file for the whole app.
     static var pairingFileURL: URL {
-        FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("airlift_pairing.plist")
+        PairingStore.fileURL
     }
 
     static var hasPairingFile: Bool {
-        FileManager.default.fileExists(atPath: pairingFileURL.path)
-    }
-
-    /// Copies an imported pairing file into the AirFlit slot.
-    static func savePairingFile(from sourceURL: URL) throws {
-        let data = try Data(contentsOf: sourceURL)
-        try data.write(to: pairingFileURL, options: .atomic)
+        PairingStore.isImported
     }
 
     // MARK: - iOS gating

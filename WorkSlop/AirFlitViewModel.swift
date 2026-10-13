@@ -7,7 +7,6 @@ import ZIPFoundation
 /// run on detached tasks, UI state stays on the main actor.
 @MainActor
 final class AirFlitViewModel: ObservableObject {
-    @Published var passcodeImage: UIImage?
     @Published var passthmURL: URL?
     @Published var passthmFileCount: Int = 0
     @Published var walletCardID: String = ""
@@ -17,8 +16,7 @@ final class AirFlitViewModel: ObservableObject {
     @Published var logLines: [String] = []
     @Published var result: String?
     @Published var resultOK = false
-    @Published var pairingNote: String?
-    @Published var hasPairingFile = AirFlitEngine.hasPairingFile
+    @Published var hasPairingFile = PairingStore.isImported
 
     var iosOK: Bool {
         let v = DeviceInfo.iosVersion
@@ -55,7 +53,6 @@ final class AirFlitViewModel: ObservableObject {
             try data.write(to: dest, options: .atomic)
             passthmURL = dest
             passthmFileCount = pngCount
-            passcodeImage = nil // .passthm takes precedence over single image
             resultOK = true
             result = "Loaded .passthm with \(pngCount) key images."
         } catch {
@@ -66,25 +63,12 @@ final class AirFlitViewModel: ObservableObject {
 
     func applyPasscodeTheme() {
         guard !running else { return }
-        // .passthm file takes precedence; otherwise use single image
-        let usePassthm = passthmURL != nil
-        let pngData: Data?
-        if usePassthm {
-            pngData = nil
-        } else {
-            guard let image = passcodeImage else { return }
-            // Snapshot PNG data on the main actor. Data is Sendable;
-            // the UIImage itself must never cross into the detached task
-            // (Swift 6: non-Sendable capture in a @Sendable closure).
-            guard let data = image.pngData(), !data.isEmpty else {
-                resultOK = false
-                result = "Could not read the chosen image."
-                return
-            }
-            pngData = data
+        // AirCard method: .passthm file only. No single-image mode.
+        guard let themeURL = passthmURL else {
+            resultOK = false
+            result = "Import a .passthm theme file first."
+            return
         }
-        // Capture Sendable values for the detached task
-        let themeURL = passthmURL
         let themeCount = passthmFileCount
         running = true
         progress = 0
@@ -99,46 +83,32 @@ final class AirFlitViewModel: ObservableObject {
                     priority: .userInitiated
                 ) { () -> [String] in
                     var log: [String] = []
-                    if let themeURL = themeURL {
-                        // .passthm mode: extract the theme zip directly,
-                        // preserving per-digit PNGs and their names.
-                        let stage = try AirFlitEngine.makeStagingDir(prefix: "airflit_passthm") { dir in
-                            guard let archive = Archive(url: themeURL, accessMode: .read) else {
-                                throw AirFlitEngine.AirFlitError.writeFailed("Cannot read .passthm")
-                            }
-                            var n = 0
-                            for entry in archive {
-                                let destURL = dir.appendingPathComponent(entry.path)
-                                // Create subdirectories as needed
-                                let parent = destURL.deletingLastPathComponent()
-                                try? FileManager.default.createDirectory(at: parent, withIntermediateDirectories: true)
-                                _ = try archive.extract(entry, to: destURL)
-                                n += 1
-                            }
-                            log.append("[AirFlit] Extracted \(n) files from .passthm (\(themeCount) PNGs)")
+                    // .passthm mode: extract the theme zip directly,
+                    // preserving per-digit PNGs and their names.
+                    let stage = try AirFlitEngine.makeStagingDir(prefix: "airflit_passthm") { dir in
+                        guard let archive = Archive(url: themeURL, accessMode: .read) else {
+                            throw AirFlitEngine.AirFlitError.writeFailed("Cannot read .passthm")
                         }
-                        defer { try? FileManager.default.removeItem(at: stage) }
-                        // Write to all TelephonyUI versions (same as AirCard)
-                        for target in ["/var/mobile/Library/Caches/TelephonyUI-10",
-                                       "/var/mobile/Library/Caches/TelephonyUI-9",
-                                       "/var/mobile/Library/Caches/TelephonyUI-8"] {
-                            log.append("[AirFlit] Writing to \((target as NSString).lastPathComponent)…")
-                            try AirFlitEngine.writeDirectory(
-                                sourceDir: stage,
-                                targetDir: target
-                            ) { line in log.append("  " + line) }
+                        var n = 0
+                        for entry in archive {
+                            let destURL = dir.appendingPathComponent(entry.path)
+                            // Create subdirectories as needed
+                            let parent = destURL.deletingLastPathComponent()
+                            try? FileManager.default.createDirectory(at: parent, withIntermediateDirectories: true)
+                            _ = try archive.extract(entry, to: destURL)
+                            n += 1
                         }
-                    } else if let pngData = pngData {
-                        // Single-image mode: generate keypad files from one image
-                        let stage = try AirFlitEngine.makeStagingDir(prefix: "airflit_passthm") { dir in
-                            let n = AirFlitImages.stagePasscodeTheme(pngData: pngData, into: dir)
-                            log.append("[AirFlit] Staged \(n) keypad files")
-                        }
-                        defer { try? FileManager.default.removeItem(at: stage) }
-                        log.append("[AirFlit] Writing to TelephonyUI-10…")
+                        log.append("[AirFlit] Extracted \(n) files from .passthm (\(themeCount) PNGs)")
+                    }
+                    defer { try? FileManager.default.removeItem(at: stage) }
+                    // Write to all TelephonyUI versions (same as AirCard)
+                    for target in ["/var/mobile/Library/Caches/TelephonyUI-10",
+                                   "/var/mobile/Library/Caches/TelephonyUI-9",
+                                   "/var/mobile/Library/Caches/TelephonyUI-8"] {
+                        log.append("[AirFlit] Writing to \((target as NSString).lastPathComponent)…")
                         try AirFlitEngine.writeDirectory(
                             sourceDir: stage,
-                            targetDir: "/var/mobile/Library/Caches/TelephonyUI-10"
+                            targetDir: target
                         ) { line in log.append("  " + line) }
                     }
                     return log
@@ -220,20 +190,6 @@ final class AirFlitViewModel: ObservableObject {
                 logLines.append("[AirFlit] Failed: \(msg)")
                 running = false
             }
-        }
-    }
-
-    // MARK: - Pairing
-
-    func savePairingFile(from url: URL) {
-        let scoped = url.startAccessingSecurityScopedResource()
-        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
-        do {
-            try AirFlitEngine.savePairingFile(from: url)
-            hasPairingFile = true
-            pairingNote = "Pairing file saved for AirFlit."
-        } catch {
-            pairingNote = "Could not save: \(error.localizedDescription)"
         }
     }
 }

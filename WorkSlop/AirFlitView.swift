@@ -14,14 +14,8 @@ import UniformTypeIdentifiers
 /// iOS window: 18.0 – 27.2 beta 2 (27.2 beta 3+ patched the vector).
 struct AirFlitView: View {
     @StateObject private var vm = AirFlitViewModel()
-    @State private var passcodeItem: PhotosPickerItem?
     @State private var walletItem: PhotosPickerItem?
-    @State private var importKind: ImportKind?
-
-    enum ImportKind: Identifiable {
-        case pairing, passthm
-        var id: Int { self == .pairing ? 0 : 1 }
-    }
+    @State private var showPassthmImporter = false
 
     var body: some View {
         ZStack {
@@ -35,36 +29,17 @@ struct AirFlitView: View {
                     }
                 }
 
-                Section {
-                    HStack {
-                        Label("Pairing file", systemImage: "key.fill")
-                        Spacer()
-                        Text(vm.hasPairingFile ? "Imported" : "Missing")
-                            .foregroundStyle(vm.hasPairingFile ? .green : .red)
+                if !vm.hasPairingFile {
+                    Section {
+                        Label("Import a pairing file from Home first.", systemImage: "exclamationmark.triangle")
+                            .foregroundStyle(.orange)
                     }
-                    Button {
-                        importKind = .pairing
-                    } label: {
-                        Label("Import pairing file…", systemImage: "square.and.arrow.down")
-                    }
-                    if let note = vm.pairingNote {
-                        Text(note)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    if !vm.hasPairingFile {
-                        Text("Import the same pairing file you use for WorkSlop (from SideStore / AltStore / etc.). AirFlit keeps its own copy for the AirTraffic channel.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                } header: {
-                    Text("Setup")
                 }
 
                 Section {
                     // .passthm file import (AirCard's native theme format)
                     Button {
-                        importKind = .passthm
+                        showPassthmImporter = true
                     } label: {
                         Label(vm.passthmURL == nil ? "Import .passthm theme…" : "Change .passthm theme…",
                               systemImage: "doc.zipper")
@@ -74,27 +49,6 @@ struct AirFlitView: View {
                             .font(.caption)
                             .foregroundStyle(.green)
                     }
-                    if let img = vm.passcodeImage {
-                        Image(uiImage: img)
-                            .resizable()
-                            .scaledToFit()
-                            .frame(height: 140)
-                            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                    }
-                    PhotosPicker(selection: $passcodeItem, matching: .images) {
-                        Label(vm.passcodeImage == nil ? "Choose keypad image…" : "Change image…",
-                              systemImage: "photo")
-                    }
-                    .onChange(of: passcodeItem) { item in
-                        Task {
-                            if let raw = try? await item?.loadTransferable(type: Data.self),
-                               let img = UIImage(data: raw) {
-                                vm.passcodeImage = img
-                                vm.passthmURL = nil // single image clears .passthm
-                                vm.passthmFileCount = 0
-                            }
-                        }
-                    }
                     Button {
                         vm.applyPasscodeTheme()
                     } label: {
@@ -102,7 +56,7 @@ struct AirFlitView: View {
                             .frame(maxWidth: .infinity, alignment: .center)
                     }
                     .buttonStyle(.borderedProminent)
-                    .disabled((vm.passcodeImage == nil && vm.passthmURL == nil) || vm.running || !vm.iosOK || !vm.hasPairingFile)
+                    .disabled(vm.passthmURL == nil || vm.running || !vm.iosOK || !vm.hasPairingFile)
                     Text("Writes to the TelephonyUI keypad cache. Lock your iPhone to see the new keypad — no restart needed.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -181,25 +135,14 @@ struct AirFlitView: View {
         .navigationTitle("AirFlit")
         .navigationBarTitleDisplayMode(.inline)
         .fileImporter(
-            isPresented: Binding(
-                get: { importKind != nil },
-                set: { if !$0 { importKind = nil } }
-            ),
-            allowedContentTypes: importKind == .passthm ? [.zip] : [.propertyList]
+            isPresented: $showPassthmImporter,
+            allowedContentTypes: [.zip]
         ) { result in
-            let kind = importKind
-            importKind = nil
             switch result {
             case .success(let url):
-                if kind == .passthm {
-                    vm.loadPassthm(from: url)
-                } else {
-                    vm.savePairingFile(from: url)
-                }
+                vm.loadPassthm(from: url)
             case .failure:
-                if kind != .passthm {
-                    vm.pairingNote = "Import cancelled."
-                }
+                break
             }
         }
     }

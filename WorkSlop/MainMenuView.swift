@@ -233,10 +233,15 @@ struct MainMenuView: View {
     // MARK: - Menus
 
     /// Native-style navigation rows: representative SF Symbols, a
-    /// disclosure chevron, clean dividers. No pill buttons here.
+    /// disclosure chevron, clean dividers. Plain Buttons pushing onto
+    /// the NavigationStack path (not NavigationLink) so the whole row
+    /// is always tappable - contentShape makes even the empty Spacer
+    /// area hit-testable.
     private var menusCard: some View {
         VStack(spacing: 0) {
-            NavigationLink(value: HomeRoute.allTweaks) {
+            Button {
+                path.append(.allTweaks)
+            } label: {
                 HStack {
                     Label {
                         Text("All Tweaks")
@@ -249,13 +254,16 @@ struct MainMenuView: View {
                         .foregroundStyle(.tertiary)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
                 .padding(.vertical, 12)
             }
             .buttonStyle(.plain)
             .accessibilityIdentifier("menu-all-tweaks")
             Divider()
                 .padding(.leading, 46)
-            NavigationLink(value: HomeRoute.settings) {
+            Button {
+                path.append(.settings)
+            } label: {
                 HStack {
                     Label {
                         Text("Settings")
@@ -268,6 +276,7 @@ struct MainMenuView: View {
                         .foregroundStyle(.tertiary)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
                 .padding(.vertical, 12)
             }
             .buttonStyle(.plain)
@@ -277,9 +286,12 @@ struct MainMenuView: View {
         .background(cardBackground)
     }
 
+    /// Liquid-Glass style card: ultra-thin material gives the
+    /// transparent blur over the animated sky instead of flat white.
+    /// (Material ShapeStyle is iOS 15+, safe for the iOS 16 target.)
     private var cardBackground: some View {
         RoundedRectangle(cornerRadius: 16, style: .continuous)
-            .fill(Color.white.opacity(0.88))
+            .fill(.ultraThinMaterial)
             .shadow(color: .black.opacity(0.06), radius: 6, y: 2)
     }
 

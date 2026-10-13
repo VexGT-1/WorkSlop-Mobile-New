@@ -5,6 +5,13 @@ struct WorkSlopApp: App {
     @AppStorage("seenIntro") private var seenIntro = false
     @State private var showIntro = false
 
+    init() {
+        // English only (user order 2026-10-13): the in-app language
+        // picker is gone, so pin AppleLanguages to English at launch
+        // (also clears any language a previous version had set).
+        UserDefaults.standard.set(["en"], forKey: "AppleLanguages")
+    }
+
     /// iOS line this build supports: iOS 16 through 27. Up to the
     /// latest iOS 26 the tweaks ride the partial restore; on iOS 27
     /// everything rides the full backup -> modify -> restore flow,

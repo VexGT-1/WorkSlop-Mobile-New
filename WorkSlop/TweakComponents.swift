@@ -128,16 +128,20 @@ struct FeatureToggleRow: View {
 
 // MARK: - Your icons + gallery
 
+/// The user's own staged icons. Editing is keyed by the entry's
+/// stable UUID (never by row index): indices shift when entries are
+/// added or deleted, which used to open the wrong entry or a blank
+/// sheet. Deletion is an explicit trailing swipe action (swipe
+/// right-to-left) so it always works, with or without edit mode.
 struct YourIconsSection: View {
     @EnvironmentObject private var stage: IconStage
-    @State private var picked: PhotosPickerItem?
-    @State private var editingIndex: Int?
+    @State private var editingID: UUID?
 
     var body: some View {
         Section {
-            ForEach(stage.entries.indices, id: \.self) { i in
+            ForEach(stage.entries) { entry in
                 HStack(spacing: 12) {
-                    if let data = stage.entries[i].imageData,
+                    if let data = entry.imageData,
                        let img = EntryImageCache.thumbnail(data) {
                         Image(uiImage: img)
                             .resizable()
@@ -150,21 +154,28 @@ struct YourIconsSection: View {
                             .overlay(Image(systemName: "app").foregroundStyle(.secondary))
                     }
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(stage.entries[i].appName.isEmpty ? "Unnamed app" : stage.entries[i].appName)
-                        Text(stage.entries[i].bundleID.isEmpty ? "Bundle ID not set" : stage.entries[i].bundleID)
+                        Text(entry.appName.isEmpty ? "Unnamed app" : entry.appName)
+                        Text(entry.bundleID.isEmpty ? "Bundle ID not set" : entry.bundleID)
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                     }
                     Spacer()
-                    Button("Edit") { editingIndex = i }
+                    Button("Edit") { editingID = entry.id }
                         .font(.footnote)
                 }
-            }
-            .onDelete { offsets in
-                stage.remove(at: offsets)
+                .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                    Button(role: .destructive) {
+                        if let i = stage.entries.firstIndex(where: { $0.id == entry.id }) {
+                            stage.remove(at: IndexSet(integer: i))
+                        }
+                    } label: {
+                        Label("Delete", systemImage: "trash")
+                    }
+                }
             }
             Button("Add app icon") {
-                editingIndex = stage.addBlank()
+                let idx = stage.addBlank()
+                editingID = stage.entries[idx].id
             }
             .accessibilityIdentifier("icons-add")
         } header: {
@@ -172,57 +183,68 @@ struct YourIconsSection: View {
         } footer: {
             Text("Pick an image, fill the app name and its bundle ID (for example com.apple.mobilesafari). Staged icons are written as Home Screen web clips by the same restore payload as the desktop icon themes.")
         }
-        .sheet(item: Binding(
-            get: { editingIndex.map { IndexBox(value: $0) } },
-            set: { editingIndex = $0?.value })) { box in
-                iconEditor(box.value)
+        .sheet(isPresented: Binding(
+            get: { editingID != nil },
+            set: { if !$0 { editingID = nil } }
+        )) {
+            if let id = editingID,
+               let i = stage.entries.firstIndex(where: { $0.id == id }) {
+                IconEditorView(entry: $stage.entries[i], stage: stage) {
+                    editingID = nil
+                }
             }
+        }
     }
+}
 
-    private struct IndexBox: Identifiable { let value: Int; var id: Int { value } }
+/// The per-icon editor. Takes a live Binding to the entry (resolved
+/// by UUID at presentation time), so it always edits the right icon
+/// even if the list changed underneath.
+struct IconEditorView: View {
+    @Binding var entry: CustomIconEntry
+    @ObservedObject var stage: IconStage
+    var onDone: () -> Void
+    @State private var picked: PhotosPickerItem?
 
-    @ViewBuilder
-    private func iconEditor(_ i: Int) -> some View {
-        if stage.entries.indices.contains(i) {
-            NavigationStack {
-                Form {
-                    Section("App") {
-                        TextField("App name", text: $stage.entries[i].appName)
-                        TextField("Bundle ID", text: $stage.entries[i].bundleID)
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled()
-                    }
-                    Section("Icon image") {
-                        if let data = stage.entries[i].imageData, let img = EntryImageCache.full(data) {
-                            Image(uiImage: img)
-                                .resizable()
-                                .scaledToFit()
-                                .frame(height: 120)
-                                .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
-                        }
-                        PhotosPicker(selection: $picked, matching: .images) {
-                            Label("Import image (JPEG / PNG / RAW)", systemImage: "photo")
-                        }
-                        Text("A bundle ID is required before this icon can be staged. The app name may stay empty (hidden label, like desktop).")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("App") {
+                    TextField("App name", text: $entry.appName)
+                    TextField("Bundle ID", text: $entry.bundleID)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
                 }
-                .navigationTitle("Icon")
-                .toolbar {
-                    Button("Done") {
+                Section("Icon image") {
+                    if let data = entry.imageData, let img = EntryImageCache.full(data) {
+                        Image(uiImage: img)
+                            .resizable()
+                            .scaledToFit()
+                            .frame(height: 120)
+                            .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+                    }
+                    PhotosPicker(selection: $picked, matching: .images) {
+                        Label("Import image (JPEG / PNG / RAW)", systemImage: "photo")
+                    }
+                    Text("A bundle ID is required before this icon can be staged. The app name may stay empty (hidden label, like desktop).")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .navigationTitle("Icon")
+            .toolbar {
+                Button("Done") {
+                    stage.save()
+                    onDone()
+                }
+            }
+            .onChange(of: picked) { item in
+                Task {
+                    if let raw = try? await item?.loadTransferable(type: Data.self),
+                       let image = UIImage(data: raw),
+                       let png = image.pngData() {
+                        entry.imageData = png
                         stage.save()
-                        editingIndex = nil
-                    }
-                }
-                .onChange(of: picked) { item in
-                    Task {
-                        if let raw = try? await item?.loadTransferable(type: Data.self),
-                           let image = UIImage(data: raw),
-                           let png = image.pngData() {
-                            stage.entries[i].imageData = png
-                            stage.save()
-                        }
                     }
                 }
             }

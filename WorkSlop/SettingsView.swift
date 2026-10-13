@@ -1,83 +1,15 @@
 import SwiftUI
 
-/// In-app language. Sets AppleLanguages; iOS applies it on the next
-/// cold start — the note below says so instead of pretending
-/// it is instant.
-enum AppLanguage: String, CaseIterable, Identifiable {
-    case system, en, id, vi
-    var id: String { rawValue }
-
-    var label: String {
-        switch self {
-        case .system: return "System"
-        case .en: return "English"
-        case .id: return "Indonesia"
-        case .vi: return "Tiếng Việt"
-        }
-    }
-
-    /// nil = follow the system language.
-    var appleCode: String? {
-        switch self {
-        case .system: return nil
-        case .en: return "en"
-        case .id: return "id"
-        case .vi: return "vi"
-        }
-    }
-
-    func apply() {
-        let ud = UserDefaults.standard
-        ud.set(rawValue, forKey: "appLanguage")
-        if let code = appleCode {
-            ud.set([code], forKey: "AppleLanguages")
-        } else {
-            ud.removeObject(forKey: "AppleLanguages")
-        }
-        ud.synchronize()
-    }
-}
-
+/// Settings: version/device info, credits, license.
+/// English only (user order 2026-10-13): the in-app language picker
+/// was removed and the app pins AppleLanguages to English at launch
+/// (see WorkSlopApp). Localizable.xcstrings is left untouched.
 struct SettingsView: View {
-    @AppStorage("appLanguage") private var appLanguageRaw = "system"
-    @State private var languageNote: String?
-
-    private var language: AppLanguage {
-        AppLanguage(rawValue: appLanguageRaw) ?? .system
-    }
-
     var body: some View {
         ZStack {
             SkyBackground()
             List {
                 Section {
-                    Picker(selection: $appLanguageRaw) {
-                        ForEach(AppLanguage.allCases) { option in
-                            Text(option.label).tag(option.rawValue)
-                        }
-                    } label: {
-                        Label {
-                            Text("Language")
-                        } icon: {
-                            RowIcon(name: "globe")
-                        }
-                    }
-                    .pickerStyle(.menu)
-                    .accessibilityIdentifier("language-picker")
-                    .onChange(of: appLanguageRaw) { _ in
-                        language.apply()
-                        languageNote = "Language saved. Restart the app to apply it."
-                    }
-                    if let languageNote {
-                        Text(languageNote)
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                    }
-                } header: {
-                    Text("Language")
-                }
-
-            Section {
                 LabeledContent("Version", value: "15.0")
                 LabeledContent("This device's iOS", value: DeviceInfoEx.fullVersion)
                 Text("iOS 26 and below: Partial restore (sparse restore, no wipe). iOS 27: Full backup → modify → restore with all data - the WorkSlop Desktop method.")

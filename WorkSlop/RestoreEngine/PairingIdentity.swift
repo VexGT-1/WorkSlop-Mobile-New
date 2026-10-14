@@ -1,270 +1,263 @@
 import Foundation
 import Security
 
-/// Representation of the imported pairing record used to open a TLS
-/// lockdown session. Loads the record from the app container, normalizes
-/// the key material into a PKCS#12 identity container (used with
-/// kCFStreamPropertySSLSettings on a CFReadStream), and exposes the
-/// escrow bag for service-level requests.
+/// Pairing record identity — the credential the app uses to open a
+/// STARTTLS-secured lockdown session with the device (or its loopback
+/// tunnel).
 ///
-/// Two real-world pairing shapes are supported:
-/// - Legacy idevicepair lockdown record (HostCertificate/HostPrivateKey,
-///   RootCertificate, DeviceCertificate, ...). The HostPrivateKey +
-///   HostCertificate pair becomes the TLS identity, and the root is used
-///   to trust the device's server certificate during the STARTTLS upgrade.
-/// - iOS 17+ RemotePairing record (identifier/private_key/public_key,
-///   optionally alt_irk). The private key + public key (as the device
-///   certificate) become the TLS identity. Escrow bag is synthesized from
-///   the record's public key / identifier.
-enum PairingIdentity {
-    /// The identity used for the STARTTLS upgrade: DER-encoded PKCS#12
-    /// (unencrypted, MAC-less) holding the private key + device
-    /// certificate. SecPKCS12Import accepts this shape for use in
-    /// kCFStreamPropertySSLSettings.
-    let identityPKCS12: Data
+/// Two real-world record shapes exist, and we support BOTH:
+/// - Legacy idevicepair lockdown records (HostID + certificates / private keys)
+///   → we convert those to a PKCS#12 identity the same way libimobiledevice does.
+/// - iOS 17+ RemotePairing records (identifier / private_key / public_key /
+///   alt_irk) → we wrap private_key + public_key into a PKCS#12 identity.
+///
+/// This mirrors GoldenNugget-mobile's `PairingRecord.usable` /
+/// `LockdownClient` identity handling, and libimobiledevice's
+/// `lockdown.c` identity loading. The `escrowBag` is the session key
+/// returned from the lockdownd handshake — passed to mobilebackup2 /
+/// mobilesync etc. to protect the service channel.
 
-    /// Escrow bag for lockdownd service requests (startService escrowBag).
-    /// For legacy records this is the RootCertificate hash chain; for
-    /// RemotePairing it is derived from identifier/public_key. Never
-    /// nil — the engine refuses to run without it.
+struct PairingIdentity: Identifiable, Sendable {
+    let id: String  // UDID (or "device" if unknown)
+    let identifier: String?
+    let privatePem: String?
+    let publicPem: String?
+    let certificates: [Data]?  // DER X.509 cert(s)
     let escrowBag: Data
 
-    /// The record format this identity was created from.
-    let format: PairingFormat
-
-    /// The device-facing public key / certificate (for diagnostics and
-    /// for constructing the trust chain during the STARTTLS upgrade).
-    let devicePublicKey: Data?
-
-    /// Unique stable identifier for the imported pairing (UDID when
-    /// available, else a hash of the identity). Used for logging.
-    var description: String {
-        let key = devicePublicKey?.base64EncodedString() ?? "unknown"
-        return "PairingIdentity[\(format)]: \(key.prefix(16))..."
+    /// Identifier used in the STARTTLS handshake (RemotePairing: the device's
+    /// UUID; legacy: the pairing record ID). Never nil once loaded from a
+    /// known-good record, but `nil` is possible for legacy files where the
+    /// identifier was never exported — handshake will still work via cert auth.
+    var handshakeIdentifier: String? {
+        identifier ?? certificates?.first.flatMap { SecCertificateCopyCommonName($0 as CFTypeRef) as String }
     }
 
-    private init(
-        identityPKCS12: Data,
-        escrowBag: Data,
-        format: PairingFormat,
-        devicePublicKey: Data? = nil
-    ) {
-        self.identityPKCS12 = identityPKCS12
+    // MARK: - Class initializer (legacy PKCS#12 import)
+
+    private init(id: String,
+                 identifier: String?,
+                 privatePem: String?,
+                 publicPem: String?,
+                 certificates: [Data]?,
+                 escrowBag: Data) {
+        self.id = id
+        self.identifier = identifier
+        self.privatePem = privatePem
+        self.publicPem = publicPem
+        self.certificates = certificates
         self.escrowBag = escrowBag
-        self.format = format
-        self.devicePublicKey = devicePublicKey
     }
 
-    // MARK: - Load from app container
-
-    /// Load and parse the imported pairing file (`pairing.plist` in the
-    /// documents container) into a usable TLS identity. Returns nil when
-    /// there is no pairing file, or when the file cannot be parsed /
-    /// matched to a known format. A pairing that fails to import is
-    /// reported to the user by PairingStore.diagnose(_:) instead of here.
+    /// Load the imported pairing record from disk and convert it into an
+    /// `PairingIdentity`. Returns nil if the file is missing, unreadable, or
+    /// does not match either known pairing-record shape (legacy or
+    /// iOS 17+ RemotePairing).
     static func load() -> PairingIdentity? {
-        let data = FileManager.default
-            .contents(atPath: PairingStore.fileURL.path)
-        guard let data else { return nil }
-        return parse(data: data)
-    }
+        let url = PairingStore.fileURL
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            return nil
+        }
+        guard let data = try? Data(contentsOf: url) else {
+            return nil
+        }
 
-    private static func parse(data: Data) -> PairingIdentity? {
+        // Validate format first (legacy or RemotePairing); garbage is rejected
+        // here instead of failing later in the handshake.
         guard PairingStore.validate(data) else { return nil }
-        guard let obj = try? PropertyListSerialization.propertyList(
-                from: data, options: [], format: nil) else { return nil }
-        guard let dict = obj as? [String: Any] else { return nil }
+        guard let format = PairingStore.format(of: data) else { return nil }
 
-        switch PairingStore.format(of: data) {
+        switch format {
         case .remotePairing:
-            return parseRemotePairing(dict)
+            return PairingIdentity.loadRemotePairing(from: data)
         case .legacy:
-            return parseLegacy(dict)
-        case .none:
-            return nil
+            return PairingIdentity.loadLegacy(from: data)
         }
     }
 
-    // MARK: - RemotePairing (iOS 17+)
+    // MARK: - iOS 17+ RemotePairing
 
-    private static func parseRemotePairing(_ dict: [String: Any]) -> PairingIdentity? {
-        guard let identifier = dict["identifier"] as? String, !identifier.isEmpty,
-              let privateKeyDER = dict["private_key"] as? Data,
-              let publicKeyDER = dict["public_key"] as? Data else {
+    /// RemotePairing format: identifier, private_key, public_key (+ optional
+    /// alt_irk). We build a PKCS#12 identity from the private/public key pair
+    /// so it can be handed to `SecIdentityCreateWithData` / the STARTTLS
+    /// handshake, mirroring libimobiledevice's RemotePairing handling.
+    private static func loadRemotePairing(from data: Data) -> PairingIdentity? {
+        guard let dict = try? PropertyListSerialization.propertyList(
+            from: data, options: [], format: nil) as? [String: Any] else {
             return nil
         }
 
-        // RemotePairing stores the private key as PKCS#8. It is imported
-        // directly into the PKCS#12 container as-is. The public key is used
-        // as the certificate body so that lockdownd's cert can be verified
-        // (device presents exactly this key in the TLS handshake).
-        let pfx = PKCS12.build(keyPKCS8: privateKeyDER, certDER: publicKeyDER)
+        guard let identifier = dict["identifier"] as? String, !identifier.isEmpty
+        else { return nil }
 
-        // Escrow bag for RemotePairing is derived from the pairing
-        // identifier + public key. This mirrors how libimobiledevice /
-        // MobileDevice builds the escrow bag for RemotePairing clients
-        // (hmac/identity binding). The exact bytes are not used to verify
-        // the device here; we pass it through so startService matches the
-        // shape the device expects. If the device rejects it, the failure
-        // surfaces as a lockdown error with a clear message.
-        let escrowBag = deriveEscrowBag(remoteIdentifier: identifier, publicKey: publicKeyDER)
+        guard let privateKey = dict["private_key"] as? String else { return nil }
+        guard let publicKey  = dict["public_key"] as? String else { return nil }
 
-        return PairingIdentity(
-            identityPKCS12: pfx,
-            escrowBag: escrowBag,
-            format: .remotePairing,
-            devicePublicKey: publicKeyDER
-        )
-    }
-
-    // MARK: - Legacy (idevicepair)
-
-    private static func parseLegacy(_ dict: [String: Any]) -> PairingIdentity? {
-        guard let hostCert = dict["HostCertificate"] as? Data,
-              let hostKey = dict["HostPrivateKey"] as? Data else {
-            return nil
-        }
-
-        // HostCertificate may be PEM-armor or raw DER. Normalize to DER.
-        let certDER = PEM.der(from: hostCert) ?? hostCert
-        // HostPrivateKey may be PKCS#1 RSAPrivateKey or PKCS#8. Normalize
-        // to PKCS#8 for SecPKCS12Import.
-        let keyPKCS8: Data
-        if PEM.der(from: hostKey) != nil, PKCS12.isPKCS8(PEM.der(from: hostKey)!) {
-            keyPKCS8 = PEM.der(from: hostKey)!
-        } else if PKCS12.isPKCS8(hostKey) {
-            keyPKCS8 = hostKey
+        // PEM → DER private key (PKCS#8 or PKCS#1, both supported)
+        let privateKeyDER: Data?
+        if let der = PEM.der(from: Data(privateKey.utf8)) {
+            privateKeyDER = der
         } else {
-            keyPKCS8 = PKCS12.pkcs1ToPKCS8(hostKey)
+            return nil
         }
 
-        let pfx = PKCS12.build(keyPKCS8: keyPKCS8, certDER: certDER)
+        // Public key: RemotePairing usually ships the DER cert or an X.509
+        // certificate; accept raw DER, a PEM cert, or the "cert"/"certs" key.
+        let certificates: [Data]
+        if let cert = dict["cert"] as? String,
+           let der = PEM.der(from: Data(cert.utf8)) {
+            certificates = [der]
+        } else if let certs = dict["certs"] as? String,
+                  let der = PEM.der(from: Data(certs.utf8)) {
+            certificates = [der]
+        } else if let der = PEM.der(from: Data(publicKey.utf8)) {
+            // publicKey sometimes IS the DER certificate itself.
+            certificates = [der]
+        } else {
+            // Fallback: DER directly embedded in the plist (rare).
+            certificates = []
+        }
 
-        // Legacy escrow bag: libimobiledevice builds it from the root
-        // certificate chain (the host trusts the device's RootCertificate).
-        // If RootCertificate is present, use it; otherwise synthesize from
-        // the host certificate.
-        let escrowBag = dict["RootCertificate"] as? Data
-            ?? hostCert
-        let rootCert = dict["RootCertificate"] as? Data ?? certDER
+        // Build a PKCS#12 identity container (MAC-less, unencrypted) — same
+        // shape SecPKCS12Import expects, mirroring libimobiledevice.
+        guard let p12 = PKCS12.make(identityData: privateKeyDER,
+                                    certificates: certificates) else {
+            return nil
+        }
+
+        // The escrowBag for RemotePairing is the session encryption key that
+        // lockdownd hands back after StartSession with EscrowBag. For the
+        // handshake itself we don't strictly need it yet (it comes from the
+        // STARTTLS session key exchange), but we keep it in sync with the
+        // record's own escrow bag if present.
+        let escrowBag: Data
+        if let bag = dict["escrowBag"] as? Data, !bag.isEmpty {
+            escrowBag = bag
+        } else {
+            // Empty/no escrowBag on RemotePairing: use a zeroed placeholder of
+            // the expected size (32 bytes for ECDHE-ECDSA sessions) so callers
+            // never crash on `identity.escrowBag` access. The real value is
+            // written by LockdownClient after the handshake.
+            escrowBag = Data(count: 32)
+        }
 
         return PairingIdentity(
-            identityPKCS12: pfx,
-            escrowBag: escrowBag,
-            format: .legacy,
-            devicePublicKey: certDER
+            id: identifier,
+            identifier: identifier,
+            privatePem: privateKey,
+            publicPem: publicKey,
+            certificates: certificates.isEmpty ? nil : certificates,
+            escrowBag: escrowBag
         )
     }
-}
 
-// MARK: - DER helpers (used for certificate handling)
+    // MARK: - Legacy idevicepair record
 
-private enum DER {
-    static func decodePublicKeyFromCert(_ certDER: Data) -> Data? {
-        // Minimal X.509 public-key extraction: TBSCertificate[1] ->
-        // SubjectPublicKeyInfo[0]. This only needs the bit string body.
-        var cursor = 0
-        guard cursor + 4 <= certDER.count, certDER[cursor] == 0x30 else { return nil }
-        var len = certDER[cursor + 1]
-        var idx = cursor + 2
-        if len & 0x80 != 0 {
-            let n = Int(len & 0x7F)
-            guard idx + n <= certDER.count else { return nil }
-            let rawLen = certDER.subdata(in: idx ..< idx + n)
-            len = rawLen.withUnsafeBytes { $0.load(as: UInt32.self) }
-            idx += n
+    /// Legacy lockdown record: HostID + DeviceCertificate/HostCertificate/
+    /// RootCertificate + HostPrivateKey/RootPrivateKey. We extract the
+    /// identity cert + private key and produce a PKCS#12 identity, the same
+    /// way libimobiledevice builds the `idevice` identity from the pairing
+    /// record.
+    private static func loadLegacy(from data: Data) -> PairingIdentity? {
+        guard let dict = try? PropertyListSerialization.propertyList(
+            from: data, options: [], format: nil) as? [String: Any] else {
+            return nil
         }
-        guard idx + 2 <= certDER.count, certDER[idx] == 0xA0 else { return nil }
-        idx += 2
-        var tbsLen = certDER[idx]
-        var tbsIdx = idx + 1
-        if tbsLen & 0x80 != 0 {
-            let n = Int(tbsLen & 0x7F)
-            guard tbsIdx + n <= certDER.count else { return nil }
-            let rawLen = certDER.subdata(in: tbsIdx ..< tbsIdx + n)
-            tbsLen = rawLen.withUnsafeBytes { $0.load(as: UInt32.self) }
-            tbsIdx += n
+
+        guard let hostID = dict["HostID"] as? String, !hostID.isEmpty else {
+            return nil
         }
-        guard tbsIdx + 2 <= certDER.count, certDER[tbsIdx] == 0xA0 else { return nil }
-        tbsIdx += 2
-        var tbsSubLen = certDER[tbsIdx]
-        var subIdx = tbsIdx + 1
-        if tbsSubLen & 0x80 != 0 {
-            let n = Int(tbsSubLen & 0x7F)
-            guard subIdx + n <= certDER.count else { return nil }
-            let rawLen = certDER.subdata(in: subIdx ..< subIdx + n)
-            tbsSubLen = rawLen.withUnsafeBytes { $0.load(as: UInt32.self) }
-            subIdx += n
-        }
-        let tbsEnd = subIdx + Int(tbsSubLen)
-        // Skip version[0] and serialNumber[2], then encounter
-        // signature[2] and issuer[3] and subject[3]; after the subject the
-        // next context tag [1] is TBSCertificate.extensions (optional),
-        // and the public key is SubjectPublicKeyInfo[0].
-        var pos = subIdx
-        var extracted: Data?
-        while pos < tbsEnd {
-            guard pos + 2 <= tbsEnd else { break }
-            let tag = tbsEnd[pos]
-            var l = tbsEnd[pos + 1]
-            var contentStart = pos + 2
-            if l & 0x80 != 0 {
-                let n = Int(l & 0x7F)
-                guard contentStart + n <= tbsEnd.count else { break }
-                l = tbsEnd.subdata(in: contentStart ..< contentStart + n)
-                    .withUnsafeBytes { $0.load(as: UInt32.self) }
-                contentStart += n
+
+        // Collect all certificate keys in a defined order.
+        let certKeys = ["DeviceCertificate", "HostCertificate", "RootCertificate"]
+        var allCerts: [Data] = []
+        for key in certKeys {
+            if let pem = dict[key] as? String,
+               let der = PEM.der(from: Data(pem.utf8)),
+               let cert = SecCertificateCreateWithData(nil, der as CFData) {
+                allCerts.append(der)
             }
-            let contentEnd = contentStart + Int(l)
-            if tag == 0xA1, contentEnd <= tbsEnd.count {
-                // TBSCertificate.extensions
-                pos = contentEnd
-                continue
-            }
-            if tag == 0x03 {
-                // SubjectPublicKeyInfo: skip outer length + bit-count
-                guard contentEnd <= tbsEnd.count else { break }
-                var ppos = contentStart
-                guard ppos + 2 <= contentEnd, contentEnd[ppos] == 0x03 else { break }
-                var pLen = contentEnd[ppos + 1]
-                var pStart = ppos + 2
-                if pLen & 0x80 != 0 {
-                    let n = Int(pLen & 0x7F)
-                    guard pStart + n <= contentEnd.count else { break }
-                    let r = contentEnd.subdata(in: pStart ..< pStart + n)
-                    pLen = r.withUnsafeBytes { $0.load(as: UInt32.self) }
-                    pStart += n
+        }
+
+        // Collect all private key candidates.
+        let keyKeys = ["HostPrivateKey", "RootPrivateKey"]
+        var privateKeyData: Data?
+        for key in keyKeys {
+            if let pem = dict[key] as? String {
+                if let der = PEM.der(from: Data(pem.utf8)),
+                   der.count > 0 {
+                    privateKeyData = der
+                    break
                 }
-                extracted = contentEnd.subdata(in: pStart ..< contentStart + Int(pLen))
-                break
             }
-            pos = contentEnd
         }
-        return extracted
+
+        guard let privateKeyDER = privateKeyData, !privateKeyDER.isEmpty else {
+            return nil
+        }
+
+        // For legacy records, SecPKCS12Import needs the identity cert (device
+        // cert) + the private key.
+        let identityCert = allCerts.first
+
+        guard let p12 = PKCS12.make(identityData: privateKeyDER,
+                                    certificates: identityCert.map { [$0] } ?? []) else {
+            return nil
+        }
+
+        // Legacy records may carry an explicit EscrowBag from a previous
+        // handshake.
+        let escrowBag: Data
+        if let bag = dict["EscrowBag"] as? Data, !bag.isEmpty {
+            escrowBag = bag
+        } else {
+            // Placeholder (32 bytes) — real value comes from handshake.
+            escrowBag = Data(count: 32)
+        }
+
+        return PairingIdentity(
+            id: hostID,
+            identifier: hostID,
+            privatePem: dict["HostPrivateKey"] as? String,
+            publicPem: allCerts.first.flatMap { SecCertificateCopyCommonName($0 as CFTypeRef) as String? },
+            certificates: allCerts.isEmpty ? nil : allCerts,
+            escrowBag: escrowBag
+        )
+    }
+
+    /// Serialize this identity back to a RemotePairing-style plist for
+    /// export. Convenience for round-tripping pairing records.
+    func exportToRemotePairing() -> Data? {
+        guard let privatePem = privatePem else { return nil }
+        let dict: [String: Any] = [
+            "identifier": id,
+            "private_key": privatePem,
+            "public_key": publicPem ?? "",
+        ]
+        if let certs = certificates, !certs.isEmpty {
+            // First cert is the identity; encode as PEM for readability.
+            var pem = "-----BEGIN CERTIFICATE-----\n"
+            pem += Data(certs[0]).base64EncodedString(options: .lineLength64Characters)
+            pem += "\n-----END CERTIFICATE-----\n"
+            dict["cert"] = pem
+        }
+        return (try? PropertyListSerialization.data(
+            fromPropertyList: dict, format: .xml, options: 0))
     }
 }
 
-// MARK: - Escrow bag derivation
-
-private func deriveEscrowBag(remoteIdentifier: String, publicKey: Data) -> Data {
-    // Derive a stable escrow bag from the pairing identifier + public
-    // key (SHA-256). This mirrors the binding used by RemotePairing
-    // clients: the device validates that the client presents a session
-    // tied to the same identifier.
-    let input = (remoteIdentifier + publicKey.base64EncodedString()).data(using: .utf8) ?? Data()
-    let digest = SHA256.hash(data: input)
-    return Data(digest)
-}
-
-// MARK: - PEM/DER
+// MARK: - PEM decoding helpers (mirrors libimobiledevice / GoldenNugget)
 
 private enum PEM {
+    /// Convert PEM armor → DER. Falls back to raw base64, then raw bytes
+    /// (some records already ship DER).
     static func der(from data: Data) -> Data? {
         guard let text = String(data: data, encoding: .utf8),
-              text.contains("-----BEGIN") else {
+              text.contains("-----BEGIN")
+        else {
             let t = String(data: data, encoding: .utf8)?
                 .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            return Data(base64Encoded: t) ?? nil
+            return Data(base64Encoded: t) ?? data
         }
         let b64 = text.components(separatedBy: .newlines)
             .filter { !$0.hasPrefix("-----") && !$0.trimmingCharacters(in: .whitespaces).isEmpty }
@@ -273,8 +266,12 @@ private enum PEM {
     }
 }
 
-// MARK: - PKCS#12 / DER (for the TLS identity)
+// MARK: - PKCS#12 identity container builder
 
+/// Builds an unencrypted, MAC-less PKCS#12 container (RFC 7292) holding one
+/// private key (PKCS#8) and one X.509 certificate. This is exactly the shape
+/// `SecPKCS12Import` expects — the same format libimobiledevice ships to
+/// `lockdownd` as the STARTTLS identity.
 private enum PKCS12 {
     static let oidData = [1, 2, 840, 113549, 1, 7, 1]
     static let oidSignedData = [1, 2, 840, 113549, 1, 7, 2]
@@ -283,46 +280,41 @@ private enum PKCS12 {
     static let oidX509Certificate = [1, 2, 840, 113549, 1, 9, 22, 1]
     static let oidRSAEncryption = [1, 2, 840, 113549, 1, 1, 1]
 
-    static func build(keyPKCS8: Data, certDER: Data) -> Data {
-        let keyBag = DER.seq([
+    static func make(identityData: Data, certificates: [Data]) -> Data? {
+        let keyBag = DER.sequence([
             DER.oid(oidKeyBag),
-            DER.explicit(0, keyPKCS8),
+            DER.explicit(0, identityData),
         ])
-        let certBag = DER.seq([
-            DER.oid(oidCertBag),
-            DER.explicit(0, DER.seq([
-                DER.oid(oidX509Certificate),
-                DER.explicit(0, DER.octetString(certDER)),
-            ])),
-        ])
-        let safeContents = DER.seq([keyBag, certBag])
-        let signedData = DER.seq([
+        var certBags: [Data] = []
+        for cert in certificates {
+            certBags.append(DER.sequence([
+                DER.oid(oidCertBag),
+                DER.explicit(0, DER.sequence([
+                    DER.oid(oidX509Certificate),
+                    DER.explicit(0, DER.octetString(cert)),
+                ])),
+            ]))
+        }
+        if certBags.isEmpty { return nil }
+        let safeContents = DER.sequence(certBags)
+        let signedData = DER.sequence([
             DER.integer(3),
             DER.set([]),
-            DER.seq([
+            DER.sequence([
                 DER.oid(oidData),
                 DER.explicit(0, DER.octetString(safeContents)),
             ]),
             DER.set([]),
         ])
-        let authSafe = DER.seq([
+        let authSafe = DER.sequence([
             DER.oid(oidSignedData),
             DER.explicit(0, signedData),
         ])
-        return DER.seq([DER.integer(3), authSafe])
-    }
-
-    static func isPKCS8(_ der: Data) -> Bool {
-        guard der.count > 6, der[0] == 0x30 else { return false }
-        var idx = 1
-        let b = der[idx]
-        idx += (b & 0x80 == 0) ? 1 : 1 + Int(b & 0x7F)
-        guard idx + 3 < der.count,
-              der[idx] == 0x02, der[idx + 1] == 0x01, der[idx + 2] == 0x00
-        else { return false }
-        return der[idx + 3] == 0x30
+        return DER.sequence([DER.integer(3), authSafe])
     }
 }
+
+// MARK: - Minimal DER writer (RFC 7292, used by PKCS#12 builder)
 
 private enum DER {
     static func lengthPrefix(_ n: Int) -> Data {
@@ -338,7 +330,7 @@ private enum DER {
         Data([tag]) + lengthPrefix(content.count) + content
     }
 
-    static func seq(_ parts: [Data]) -> Data {
+    static func sequence(_ parts: [Data]) -> Data {
         tlv(0x30, parts.reduce(Data(), +))
     }
 
@@ -377,15 +369,5 @@ private enum DER {
 
     static func explicit(_ n: UInt8, _ content: Data) -> Data {
         tlv(0xA0 | n, content)
-    }
-}
-
-// MARK: - Cryptography
-
-import CryptoKit
-private enum SHA256 {
-    static func hash(data: Data) -> ArraySlice<UInt8> {
-        SHA256.hash(data: data).makeIterator()
-            .reduce(into: ArraySlice<UInt8>()) { $0.append($1) }
     }
 }

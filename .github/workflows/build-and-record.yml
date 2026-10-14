@@ -4,7 +4,13 @@ name: Build IPA
 # The full xcodebuild log is ALWAYS uploaded too, so a failed build
 # leaves a downloadable log to send back for fixing.
 # No simulator, no recordings, ever.
+#
+# Triggers:
+# - push  → setiap commit baru ke main/master langsung auto-build
+# - workflow_dispatch → bisa dijalankan manual kapan saja
 on:
+  push:
+    branches: [main, master]
   workflow_dispatch:
 
 jobs:

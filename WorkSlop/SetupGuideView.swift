@@ -29,11 +29,20 @@ struct SetupGuideView: View {
                         )
                         .font(.subheadline)
                         Text(
-                            "Cari & install app tunnel loopback untuk lockdownd " +
-                            "(LocalDevVPN atau sejenisnya — package pihak ketiga, " +
-                            "bukan bagian dari repo WorkSlop ini). Install lewat " +
+                            "Download & install LocalDevVPN (tunnel loopback untuk " +
+                            "lockdownd) dari repo resminya — ini app pihak ketiga, " +
+                            "bukan bagian dari repo WorkSlop ini. Pasang lewat " +
                             "TrollStore, AltStore, Sideloadly, atau cara sideload " +
                             "lain yang kamu pakai. Pasang, lalu nyalakan tunnelnya."
+                        )
+                        .font(.subheadline)
+                        Link("📥 Download LocalDevVPN (GitHub)",
+                             destination: URL(string: "https://github.com/doronz89/LocalDevVPN")!)
+                            .font(.subheadline)
+                        Text(
+                            "Alternatif: package tunnel lockdownd sejenisnya yang " +
+                            "support loopback ke port 62078. Yang penting: app " +
+                            "tunnel harus aktif & jalan berdampingan dengan WorkSlop."
                         )
                         .font(.subheadline)
                         .foregroundStyle(.secondary)

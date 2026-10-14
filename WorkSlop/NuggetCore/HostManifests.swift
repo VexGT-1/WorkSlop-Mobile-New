@@ -1,4 +1,5 @@
 import Foundation
+import SQLite3
 
 // PORT from GoldenNugget-mobile (Nugget/Core/HostManifests.swift)
 // https://github.com/goldennugget-team/goldennugget-mobile

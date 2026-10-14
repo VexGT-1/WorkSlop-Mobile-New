@@ -5,45 +5,11 @@ import Foundation
 // Source of truth: GoldenNugget's src/tweaks/registry.py + basic_plist_locations.py.
 //
 // This is the data half of the tweak port. TweakModel.swift carries the types
-// (TweakSpec/TweakValue); this file carries the FileLocation enum, the Section
-// enum, the Kind enum, and the registry array itself.
+// (TweakSpec/TweakValue/TweakFileLocation/TweakSection/TweakKind); this file
+// carries the registry array itself.
 
-/// An absolute device path a tweak writes to. Ported from GoldenNugget's
-/// FileLocation enum; TweakDomainMap turns it into (domain, relativePath).
-enum TweakFileLocation: String, CaseIterable, Sendable {
-    case featureflags = "/var/preferences/FeatureFlags/Global.plist"
-    case springboard = "/var/Managed Preferences/mobile/com.apple.springboard.plist"
-    case footnote = "/var/containers/Shared/SystemGroup/systemgroup.com.apple.configurationprofiles/Library/ConfigurationProfiles/SharedDeviceConfiguration.plist"
-    case airdrop = "/var/Managed Preferences/mobile/com.apple.sharingd.plist"
-    case nanoregistry = "/var/mobile/Library/Preferences/com.apple.NanoRegistry.plist"
-    case statusBarOverridesArchive = "/var/mobile/Library/SpringBoard/StatusBarOverrides.archive"
-    case globalPreferences = "/var/Managed Preferences/mobile/.GlobalPreferences.plist"
-    case globalPreferencesHomeDomain = "/var/mobile/Library/Preferences/.GlobalPreferences.plist"
-    case appStore = "/var/Managed Preferences/mobile/com.apple.AppStore.plist"
-    case backboardd = "/var/Managed Preferences/mobile/com.apple.backboardd.plist"
-    case coreMotion = "/var/Managed Preferences/mobile/com.apple.CoreMotion.plist"
-    case pasteboard = "/var/Managed Preferences/mobile/com.apple.Pasteboard.plist"
-    case notes = "/var/Managed Preferences/mobile/com.apple.mobilenotes.plist"
-    case uikit = "/var/Managed Preferences/mobile/com.apple.UIKit.plist"
-    case disabledDaemons = "/var/db/com.apple.xpc.launchd/disabled.plist"
-    case screentime = "/var/mobile/Library/Preferences/com.apple.ScreenTimeAgent.plist"
-}
-
-/// A tweaks-page section. Raw values match GoldenNugget's Section enum.
-enum TweakSection: String, CaseIterable, Identifiable, Sendable {
-    case liquidGlass = "Liquid Glass"
-    case springboard = "SpringBoard"
-    case internalOptions = "Internal Options"
-    case daemons = "Daemons to Disable"
-    var id: String { rawValue }
-}
-
-/// The UI editor a spec wants. Matches GoldenNugget's Kind enum.
-enum TweakKind: Sendable {
-    case toggle
-    case text
-    case number
-}
+// NOTE: TweakFileLocation, TweakSection, TweakKind didefinisikan di
+// TweakModel.swift agar tidak ada duplikasi.
 
 /// Every registry-defined tweak, in the reference's own order.
 ///

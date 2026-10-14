@@ -299,11 +299,7 @@ struct GalleryRow: View {
     }
 
     private var variantLabel: String {
-        switch variant {
-        case .light: return "light"
-        case .dark: return "dark"
-        case .tinted: return "tinted"
-        }
+        variant.label
     }
 
     private func galleryData() -> Data? {
@@ -311,6 +307,7 @@ struct GalleryRow: View {
         case .light: return IOS18IconCatalog.imageData(slug: icon.slug, dark: false)
         case .dark: return IOS18IconCatalog.imageData(slug: icon.slug, dark: true)
         case .tinted: return IOS18IconCatalog.tintedImageData(slug: icon.slug)
+        default: return IOS18IconCatalog.variantImageData(variant, slug: icon.slug)
         }
     }
 
@@ -319,6 +316,7 @@ struct GalleryRow: View {
         case .light: return IOS18IconCatalog.image(slug: icon.slug, dark: false)
         case .dark: return IOS18IconCatalog.image(slug: icon.slug, dark: true)
         case .tinted: return IOS18IconCatalog.tintedImage(slug: icon.slug)
+        default: return IOS18IconCatalog.variantImage(variant, slug: icon.slug)
         }
     }
 }

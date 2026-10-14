@@ -19,9 +19,57 @@ struct IOS18Icon: Identifiable {
 
 /// Gallery variant: the Light and Dark tables from the pack,
 /// plus the Tinted set (official catwithabaloon 2.0 artwork,
-/// byte-identical copies under iOS18Icons/Tinted).
-enum IconVariant {
+/// byte-identical copies under iOS18Icons/Tinted), plus 7 custom
+/// tinted color variants generated from the Light artwork.
+enum IconVariant: CaseIterable {
     case light, dark, tinted
+    case tintedGreen, tintedYellow, tintedBlue
+    case tintedWhite, tintedGray, tintedBrown, tintedCream
+
+    var label: String {
+        switch self {
+        case .light: return "light"
+        case .dark: return "dark"
+        case .tinted: return "tinted"
+        case .tintedGreen: return "tinted-green"
+        case .tintedYellow: return "tinted-yellow"
+        case .tintedBlue: return "tinted-blue"
+        case .tintedWhite: return "tinted-white"
+        case .tintedGray: return "tinted-gray"
+        case .tintedBrown: return "tinted-brown"
+        case .tintedCream: return "tinted-cream"
+        }
+    }
+
+    var title: String {
+        switch self {
+        case .light: return "Light"
+        case .dark: return "Dark"
+        case .tinted: return "Tinted"
+        case .tintedGreen: return "Tinted Green"
+        case .tintedYellow: return "Tinted Yellow"
+        case .tintedBlue: return "Tinted Blue"
+        case .tintedWhite: return "Tinted White"
+        case .tintedGray: return "Tinted Gray"
+        case .tintedBrown: return "Tinted Brown"
+        case .tintedCream: return "Tinted Cream"
+        }
+    }
+
+    var subdirectory: String {
+        switch self {
+        case .light: return "iOS18Icons/Light"
+        case .dark: return "iOS18Icons/Dark"
+        case .tinted: return "iOS18Icons/Tinted"
+        case .tintedGreen: return "iOS18Icons/TintedGreen"
+        case .tintedYellow: return "iOS18Icons/TintedYellow"
+        case .tintedBlue: return "iOS18Icons/TintedBlue"
+        case .tintedWhite: return "iOS18Icons/TintedWhite"
+        case .tintedGray: return "iOS18Icons/TintedGray"
+        case .tintedBrown: return "iOS18Icons/TintedBrown"
+        case .tintedCream: return "iOS18Icons/TintedCream"
+        }
+    }
 }
 
 enum IOS18IconCatalog {
@@ -117,6 +165,33 @@ enum IOS18IconCatalog {
 
     static func hasTinted(slug: String) -> Bool {
         Bundle.main.url(forResource: slug, withExtension: "png", subdirectory: "iOS18Icons/Tinted") != nil
+    }
+
+    /// Generic: check if a variant has artwork for a slug
+    static func hasVariant(_ variant: IconVariant, slug: String) -> Bool {
+        Bundle.main.url(forResource: slug, withExtension: "png", subdirectory: variant.subdirectory) != nil
+    }
+
+    /// Generic: load image data for any variant
+    static func variantImageData(_ variant: IconVariant, slug: String) -> Data? {
+        guard let url = Bundle.main.url(forResource: slug, withExtension: "png", subdirectory: variant.subdirectory)
+        else { return nil }
+        return try? Data(contentsOf: url)
+    }
+
+    /// Generic: decoded + cached image for any variant
+    static func variantImage(_ variant: IconVariant, slug: String) -> UIImage? {
+        let key = (variant.label + ":" + slug) as NSString
+        if let hit = imageCache.object(forKey: key) { return hit }
+        guard let data = variantImageData(variant, slug: slug),
+              let img = UIImage(data: data) else { return nil }
+        imageCache.setObject(img, forKey: key)
+        return img
+    }
+
+    /// Icons for a given variant, filtered once
+    static func icons(for variant: IconVariant) -> [IOS18Icon] {
+        all.filter { hasVariant(variant, slug: $0.slug) }
     }
 
     static func tintedImageData(slug: String) -> Data? {

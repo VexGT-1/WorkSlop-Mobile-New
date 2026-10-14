@@ -117,32 +117,72 @@ struct TweakListView: View {
 
     // MARK: - Custom Icons (Your Icons + iOS 18 galleries)
 
+    private func selectAll(variant: IconVariant) {
+        for icon in IOS18IconCatalog.icons(for: variant) {
+            guard let data = galleryDataFor(icon: icon, variant: variant) else { continue }
+            iconStage.stage(CustomIconEntry(bundleID: icon.bundleID, appName: icon.name, imageData: data))
+        }
+    }
+
+    private func galleryDataFor(icon: IOS18Icon, variant: IconVariant) -> Data? {
+        switch variant {
+        case .light: return IOS18IconCatalog.imageData(slug: icon.slug, dark: false)
+        case .dark: return IOS18IconCatalog.imageData(slug: icon.slug, dark: true)
+        case .tinted: return IOS18IconCatalog.tintedImageData(slug: icon.slug)
+        default: return IOS18IconCatalog.variantImageData(variant, slug: icon.slug)
+        }
+    }
+
+    private func gallerySection(variant: IconVariant) -> some View {
+        Section {
+            ForEach(IOS18IconCatalog.icons(for: variant)) { icon in
+                GalleryRow(icon: icon, variant: variant)
+            }
+        } header: {
+            HStack {
+                Text(variant.title)
+                Spacer()
+                Button("Select All") {
+                    selectAll(variant: variant)
+                }
+                .font(.caption)
+                .buttonStyle(.bordered)
+            }
+        }
+    }
+
     private var customIcons: some View {
         Group {
             YourIconsSection()
-            Section {
-                ForEach(IOS18IconCatalog.lightIcons) { icon in
-                    GalleryRow(icon: icon, variant: .light)
-                }
-            } header: {
-                Text("Light")
-            }
-            Section {
-                ForEach(IOS18IconCatalog.darkIcons) { icon in
-                    GalleryRow(icon: icon, variant: .dark)
-                }
-            } header: {
-                Text("Dark")
-            }
+            gallerySection(variant: .light)
+            gallerySection(variant: .dark)
             Section {
                 ForEach(IOS18IconCatalog.tintedIcons) { icon in
                     GalleryRow(icon: icon, variant: .tinted)
                 }
             } header: {
-                Text("Tinted")
+                HStack {
+                    Text("Tinted")
+                    Spacer()
+                    Button("Select All") {
+                        for icon in IOS18IconCatalog.tintedIcons {
+                            guard let data = IOS18IconCatalog.tintedImageData(slug: icon.slug) else { continue }
+                            iconStage.stage(CustomIconEntry(bundleID: icon.bundleID, appName: icon.name, imageData: data))
+                        }
+                    }
+                    .font(.caption)
+                    .buttonStyle(.bordered)
+                }
             } footer: {
                 Text("Official iOS 18 icon pack by catwithabaloon (v2.0), shipped byte-identical from WorkSlop Desktop v15.")
             }
+            gallerySection(variant: .tintedGreen)
+            gallerySection(variant: .tintedYellow)
+            gallerySection(variant: .tintedBlue)
+            gallerySection(variant: .tintedWhite)
+            gallerySection(variant: .tintedGray)
+            gallerySection(variant: .tintedBrown)
+            gallerySection(variant: .tintedCream)
         }
     }
 }

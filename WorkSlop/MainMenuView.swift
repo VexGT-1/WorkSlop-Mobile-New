@@ -72,7 +72,11 @@ struct MainMenuView: View {
         }
         .fileImporter(
             isPresented: $importing,
-            allowedContentTypes: [.propertyList]
+            // Pairing files come as .plist, .mobiledevicepairing (Jitterbug,
+            // idevice_pair, StikDebug) or with no extension at all. Allowing
+            // only .propertyList greyed most of them out in the picker; the
+            // content is validated after picking instead.
+            allowedContentTypes: PairingStore.importTypes
         ) { result in
             switch result {
             case .success(let url): flashNote(importPairing(from: url) ?? "Pairing file saved.")
@@ -323,12 +327,9 @@ struct MainMenuView: View {
     // MARK: - Pairing import
 
     private func importPairing(from url: URL) -> String? {
-        guard url.pathExtension.lowercased() == "plist" else {
-            return "Only a .plist pairing file is accepted - nothing was saved."
-        }
-        let scoped = url.startAccessingSecurityScopedResource()
-        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
-        guard let data = try? Data(contentsOf: url) else {
+        // No extension check: the record is recognised by its content, so a
+        // .mobiledevicepairing or extensionless export is accepted too.
+        guard let data = PairingStore.readPicked(url) else {
             return "The file could not be read - nothing was saved."
         }
         guard let format = PairingStore.format(of: data) else {

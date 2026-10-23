@@ -1,4 +1,5 @@
 import Foundation
+import UniformTypeIdentifiers
 
 /// The pairing record the user imports once; the app stores it in its
 /// own container and uses it to open the local lockdown session for
@@ -25,6 +26,32 @@ enum PairingStore {
     static var fileURL: URL {
         FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("pairing.plist")
+    }
+
+    /// Types offered in the file picker. .mobiledevicepairing is declared in
+    /// Info.plist (conforms to a property list); `.data` catches extensionless
+    /// or oddly named exports, which are then validated by content.
+    static var importTypes: [UTType] {
+        var types: [UTType] = [.propertyList, .xmlPropertyList, .binaryPropertyList]
+        if let mdp = UTType("com.apple.mobiledevicepairing") ?? UTType(filenameExtension: "mobiledevicepairing") {
+            types.append(mdp)
+        }
+        types.append(.data)
+        return types
+    }
+
+    /// Reads a file picked with .fileImporter. Takes the security scope and
+    /// goes through NSFileCoordinator, so a file still in iCloud Drive is
+    /// downloaded first instead of failing as unreadable.
+    static func readPicked(_ url: URL) -> Data? {
+        let scoped = url.startAccessingSecurityScopedResource()
+        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+        var result: Data?
+        var coordError: NSError?
+        NSFileCoordinator().coordinate(readingItemAt: url, options: [], error: &coordError) { readURL in
+            result = try? Data(contentsOf: readURL)
+        }
+        return result ?? (try? Data(contentsOf: url))
     }
 
     static var isImported: Bool {

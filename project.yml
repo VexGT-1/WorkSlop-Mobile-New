@@ -17,6 +17,14 @@ targets:
         CFBundleName: WorkSlop
         CFBundleDisplayName: WorkSlop
         UILaunchScreen: {}
+        UTImportedTypeDeclarations:
+          - UTTypeIdentifier: com.apple.mobiledevicepairing
+            UTTypeDescription: Device pairing record
+            UTTypeConformsTo:
+              - com.apple.property-list
+            UTTypeTagSpecification:
+              public.filename-extension:
+                - mobiledevicepairing
         UTExportedTypeDeclarations:
           - UTTypeIdentifier: com.adnan120hz.workslop.tendies
             UTTypeDescription: PosterBoard tendies package

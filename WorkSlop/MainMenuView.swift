@@ -17,7 +17,6 @@ struct MainMenuView: View {
     @EnvironmentObject private var selection: SelectionStore
     @EnvironmentObject private var iconStage: IconStage
     @State private var path: [HomeRoute] = []
-    @State private var importing = false
     @State private var pairingNote: String?
     @State private var showTunnelInfo = false
     @State private var showAbout = false
@@ -68,19 +67,6 @@ struct MainMenuView: View {
             case "settings": path = [.settings]
             case "apply": path = [.apply]
             default: break
-            }
-        }
-        .fileImporter(
-            isPresented: $importing,
-            // Pairing files come as .plist, .mobiledevicepairing (Jitterbug,
-            // idevice_pair, StikDebug) or with no extension at all. Allowing
-            // only .propertyList greyed most of them out in the picker; the
-            // content is validated after picking instead.
-            allowedContentTypes: PairingStore.importTypes
-        ) { result in
-            switch result {
-            case .success(let url): flashNote(importPairing(from: url) ?? "Pairing file saved.")
-            case .failure: flashNote("Import cancelled.")
             }
         }
         .sheet(isPresented: $showTunnelInfo) { TunnelInfoView() }
@@ -139,7 +125,12 @@ struct MainMenuView: View {
 
             HStack {
                 Button(status.pairingImported ? "Re-import pairing file" : "Import pairing file (.plist)") {
-                    importing = true
+                    // UIKit picker, not .fileImporter: next to this view's
+                    // sheets the SwiftUI one opened but ignored taps on files.
+                    DocumentPicker.present(types: PairingStore.importTypes) { url in
+                        guard let url else { return }
+                        flashNote(importPairing(from: url) ?? "Pairing file saved.")
+                    }
                 }
                 .accessibilityIdentifier("import-pairing")
                 Spacer()
